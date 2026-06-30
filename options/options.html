@@ -1,0 +1,352 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Redirect Shield - Settings & Analytics</title>
+  <link rel="stylesheet" href="options.css">
+</head>
+<body>
+  <div class="dashboard-container">
+    <!-- Sidebar Navigation -->
+    <aside class="sidebar">
+      <div class="sidebar-logo">
+        <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
+        </svg>
+        <span>Redirect Shield</span>
+      </div>
+      <nav class="sidebar-nav">
+        <button class="nav-item active" data-target="protection-section">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <rect x="3" y="11" width="18" height="11" rx="2" ry="2"/>
+            <path d="M7 11V7a5 5 0 0 1 10 0v4"/>
+          </svg>
+          Protection Levels
+        </button>
+        <button class="nav-item" data-target="domains-section">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M12 2L2 7l10 5 10-5-10-5z"/>
+            <path d="M2 17l10 5 10-5"/>
+            <path d="M2 12l10 5 10-5"/>
+          </svg>
+          Domain Management
+        </button>
+        <button class="nav-item" data-target="stats-section">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <line x1="18" y1="20" x2="18" y2="10"/>
+            <line x1="12" y1="20" x2="12" y2="4"/>
+            <line x1="6" y1="20" x2="6" y2="14"/>
+          </svg>
+          Analytics & Insights
+        </button>
+        <button class="nav-item" data-target="preferences-section">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <circle cx="12" cy="12" r="3"/>
+            <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/>
+          </svg>
+          Preferences
+        </button>
+      </nav>
+      <div class="sidebar-footer">
+        <span class="version">Version 1.0.0</span>
+      </div>
+    </aside>
+
+    <!-- Main Content Area -->
+    <main class="main-content">
+      
+      <!-- Protection Levels Section -->
+      <section id="protection-section" class="tab-panel active">
+        <div class="panel-header">
+          <h2>Protection Level Configuration</h2>
+          <p>Choose the level of redirect protection that fits your browsing experience.</p>
+        </div>
+        
+        <div class="protection-levels-grid">
+          <!-- Low -->
+          <div class="level-card glass-card" data-level="low">
+            <div class="level-header">
+              <span class="level-badge-indicator low">Low</span>
+              <h3>Basic Shield</h3>
+            </div>
+            <p class="level-desc">Blocks standard JavaScript-triggered popup windows. Ideal for basic usage.</p>
+            <ul class="level-features">
+              <li><span class="check">✔</span> Blocks window.open()</li>
+              <li><span class="cross">✘</span> Allows external tab redirects</li>
+              <li><span class="cross">✘</span> Allows clickable overlays</li>
+            </ul>
+          </div>
+          <!-- Medium -->
+          <div class="level-card glass-card" data-level="medium">
+            <div class="level-header">
+              <span class="level-badge-indicator medium">Medium</span>
+              <h3>Moderate Shield</h3>
+            </div>
+            <p class="level-desc">Blocks popups and automatic page redirects without user interactions. Keeps same-tab legitimate actions.</p>
+            <ul class="level-features">
+              <li><span class="check">✔</span> Blocks window.open()</li>
+              <li><span class="check">✔</span> Intercepts Location redirects</li>
+              <li><span class="check">✔</span> Changes target="_blank"</li>
+              <li><span class="cross">✘</span> Allows hidden overlays</li>
+            </ul>
+          </div>
+          <!-- High -->
+          <div class="level-card glass-card active" data-level="high">
+            <div class="level-header">
+              <span class="level-badge-indicator high">High</span>
+              <h3>Advanced Shield</h3>
+            </div>
+            <p class="level-desc">Recommended settings. Sweeps ad elements, removes z-index transparent hijacking layers, and locks automatic page redirections.</p>
+            <ul class="level-features">
+              <li><span class="check">✔</span> Blocks all popups</li>
+              <li><span class="check">✔</span> Intercepts all Location & History</li>
+              <li><span class="check">✔</span> Removes click-hijack overlays</li>
+              <li><span class="check">✔</span> Suppresses dynamic ads</li>
+            </ul>
+          </div>
+          <!-- Extreme -->
+          <div class="level-card glass-card" data-level="extreme">
+            <div class="level-header">
+              <span class="level-badge-indicator extreme">Extreme</span>
+              <h3>Strict Shield</h3>
+            </div>
+            <p class="level-desc">Strict security. Blocks any and all external navigations. May break some user login integrations.</p>
+            <ul class="level-features">
+              <li><span class="check">✔</span> Blocks all external clicks</li>
+              <li><span class="check">✔</span> Blocks all window processes</li>
+              <li><span class="check">✔</span> Total overlay removal</li>
+              <li><span class="check">✔</span> Strict main-world locks</li>
+            </ul>
+          </div>
+        </div>
+
+        <div class="status-summary glass-card">
+          <div class="status-icon">
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+              <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
+            </svg>
+          </div>
+          <div class="status-details">
+            <h3>Active Shielding is <span id="summary-active-status" class="status-green">ON</span></h3>
+            <p>Your current setting is <strong id="summary-active-level">Advanced Shield (High)</strong>. You are fully protected from unwanted redirects.</p>
+          </div>
+        </div>
+      </section>
+
+      <!-- Domains Manager Section -->
+      <section id="domains-section" class="tab-panel">
+        <div class="panel-header">
+          <h2>Domain Whitelist & Blacklist</h2>
+          <p>Explicitly configure which websites are trusted or restricted.</p>
+        </div>
+
+        <div class="domains-grid">
+          <!-- Whitelist -->
+          <div class="domain-card-wrapper glass-card">
+            <div class="domain-card-header">
+              <h3>Trusted Whitelist</h3>
+              <p>No redirects will be blocked on these domains.</p>
+            </div>
+            <div class="domain-input-row">
+              <input type="text" id="whitelist-input" placeholder="e.g. example.com" />
+              <button id="add-whitelist-btn" class="dashboard-btn primary">Add</button>
+            </div>
+            <div class="search-filter-row">
+              <input type="text" id="whitelist-search" class="search-box" placeholder="Search Whitelist..." />
+            </div>
+            <div class="list-container">
+              <ul id="whitelist-list" class="domain-list">
+                <!-- Injected dynamically -->
+              </ul>
+            </div>
+          </div>
+
+          <!-- Blacklist -->
+          <div class="domain-card-wrapper glass-card">
+            <div class="domain-card-header">
+              <h3>Restricted Blacklist</h3>
+              <p>Extreme protection will always apply on these domains.</p>
+            </div>
+            <div class="domain-input-row">
+              <input type="text" id="blacklist-input" placeholder="e.g. sketchy-site.com" />
+              <button id="add-blacklist-btn" class="dashboard-btn danger">Add</button>
+            </div>
+            <div class="search-filter-row">
+              <input type="text" id="blacklist-search" class="search-box" placeholder="Search Blacklist..." />
+            </div>
+            <div class="list-container">
+              <ul id="blacklist-list" class="domain-list">
+                <!-- Injected dynamically -->
+              </ul>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- Analytics Section -->
+      <section id="stats-section" class="tab-panel">
+        <div class="panel-header">
+          <h2>Analytics & Logs</h2>
+          <p>Overview of threat vectors and redirection patterns blocked by Redirect Shield.</p>
+        </div>
+
+        <!-- Big stats rows -->
+        <div class="stats-overview-row">
+          <div class="stat-large-card glass-card">
+            <span class="value" id="stats-total-all">0</span>
+            <span class="label">Total Blocks</span>
+          </div>
+          <div class="stat-large-card glass-card">
+            <span class="value" id="stats-today-all">0</span>
+            <span class="label">Today's Blocks</span>
+          </div>
+          <div class="stat-large-card glass-card">
+            <span class="value" id="stats-weekly-all">0</span>
+            <span class="label">Weekly Blocks</span>
+          </div>
+          <div class="stat-large-card glass-card">
+            <span class="value" id="stats-monthly-all">0</span>
+            <span class="label">Monthly Blocks</span>
+          </div>
+        </div>
+
+        <!-- Charts Grid -->
+        <div class="insights-grid">
+          <div class="insight-card glass-card">
+            <h3>Top Blocked Domains</h3>
+            <div id="top-domains-container" class="bar-chart-container">
+              <!-- Render progress bars dynamically -->
+              <p class="no-data">No data recorded yet.</p>
+            </div>
+          </div>
+
+          <div class="insight-card glass-card">
+            <h3>Blocked Category Vectors</h3>
+            <div class="bar-chart-container">
+              <div class="chart-bar-row">
+                <div class="chart-bar-info">
+                  <span>Popups (window.open)</span>
+                  <strong id="bar-val-popups">0</strong>
+                </div>
+                <div class="chart-progress-outer">
+                  <div id="progress-bar-popups" class="chart-progress-inner" style="width: 0%"></div>
+                </div>
+              </div>
+              
+              <div class="chart-bar-row">
+                <div class="chart-bar-info">
+                  <span>Redirects (assign/replace)</span>
+                  <strong id="bar-val-redirects">0</strong>
+                </div>
+                <div class="chart-progress-outer">
+                  <div id="progress-bar-redirects" class="chart-progress-inner" style="width: 0%"></div>
+                </div>
+              </div>
+
+              <div class="chart-bar-row">
+                <div class="chart-bar-info">
+                  <span>Invisible Overlays</span>
+                  <strong id="bar-val-overlays">0</strong>
+                </div>
+                <div class="chart-progress-outer">
+                  <div id="progress-bar-overlays" class="chart-progress-inner" style="width: 0%"></div>
+                </div>
+              </div>
+
+              <div class="chart-bar-row">
+                <div class="chart-bar-info">
+                  <span>Window Intercepts (pushState)</span>
+                  <strong id="bar-val-windows">0</strong>
+                </div>
+                <div class="chart-progress-outer">
+                  <div id="progress-bar-windows" class="chart-progress-inner" style="width: 0%"></div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- Preferences Section -->
+      <section id="preferences-section" class="tab-panel">
+        <div class="panel-header">
+          <h2>Preferences & Data Management</h2>
+          <p>Fine tune notifications, console output, and handle importing/exporting settings.</p>
+        </div>
+
+        <div class="preferences-grid">
+          <!-- Toggles -->
+          <div class="preferences-card glass-card">
+            <h3>Notification & Logs Settings</h3>
+            <div class="setting-toggle-row">
+              <div class="setting-info">
+                <h4>Show Toast Notifications</h4>
+                <p>Displays a brief notification inside page layout when a redirect is blocked.</p>
+              </div>
+              <label class="switch">
+                <input type="checkbox" id="pref-show-toasts" checked>
+                <span class="slider"></span>
+              </label>
+            </div>
+
+            <div class="setting-toggle-row">
+              <div class="setting-info">
+                <h4>Browser Console Logging</h4>
+                <p>Outputs logs to developer tools console showing blocked items for auditing.</p>
+              </div>
+              <label class="switch">
+                <input type="checkbox" id="pref-console-logging" checked>
+                <span class="slider"></span>
+              </label>
+            </div>
+
+            <div class="setting-toggle-row">
+              <div class="setting-info">
+                <h4>Auto-remove Overlays</h4>
+                <p>Enables running scripts to inspect and eliminate click-hijacking divs.</p>
+              </div>
+              <label class="switch">
+                <input type="checkbox" id="pref-remove-overlays" checked>
+                <span class="slider"></span>
+              </label>
+            </div>
+          </div>
+
+          <!-- Backup / Import Export -->
+          <div class="preferences-card glass-card">
+            <h3>Data Migration</h3>
+            <p class="backup-note">Export settings to a local JSON configuration file to backup your lists and stats, or import configurations.</p>
+            <div class="backup-actions">
+              <button id="export-settings-btn" class="dashboard-btn outline-secondary">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+                  <polyline points="17 8 12 3 7 8"/>
+                  <line x1="12" y1="3" x2="12" y2="15"/>
+                </svg>
+                Export Settings
+              </button>
+              <button id="import-settings-trigger" class="dashboard-btn outline-secondary">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+                  <polyline points="7 10 12 15 17 10"/>
+                  <line x1="12" y1="15" x2="12" y2="3"/>
+                </svg>
+                Import Settings
+              </button>
+              <input type="file" id="import-settings-file" accept=".json" style="display: none;" />
+            </div>
+            
+            <div class="danger-zone">
+              <h4>Reset Configuration</h4>
+              <p>Warning: Restores all stats, whitelist, and blacklist back to initial setup states.</p>
+              <button id="reset-all-settings-btn" class="dashboard-btn danger">Factory Reset Extension</button>
+            </div>
+          </div>
+        </div>
+      </section>
+    </main>
+  </div>
+  <script src="options.js"></script>
+</body>
+</html>
