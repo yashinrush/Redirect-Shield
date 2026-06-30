@@ -4,8 +4,8 @@
  */
 
 (function() {
-  // Config injected by content.js before script load
-  const config = window.__REDIRECT_SHIELD_CONFIG__ || {
+  // Initial default config (highly secure default, updated dynamically by content.js)
+  let config = {
     enabled: true,
     protectionLevel: 'high',
     isWhitelisted: false,
@@ -14,28 +14,23 @@
     debugMode: false
   };
 
-  // If extension disabled or site is whitelisted, skip overrides
-  if (!config.enabled || config.isWhitelisted) {
-    if (config.consoleLogging) {
-      console.log('[RedirectShield] Protection inactive for this domain.');
-    }
-    return;
-  }
-
-  if (config.consoleLogging) {
-    console.log(`[RedirectShield] Actively shielding domain with protection level: ${config.protectionLevel}`);
-  }
-
-  // 1. Keep track of user interaction to separate manual actions from automatic redirect scripts
+  // 1. Keep track of user interaction clicks and their targets
+  let lastClickTarget = null;
+  let lastClickTime = 0;
+  let lastClickTrusted = false;
   let isUserInteracting = false;
   let interactionTimeout = null;
 
-  function registerInteraction() {
+  function registerInteraction(e) {
     isUserInteracting = true;
+    lastClickTime = Date.now();
+    lastClickTrusted = e.isTrusted !== false; // Check for programmatic click event dispatching
+    lastClickTarget = e.target;
+
     if (interactionTimeout) clearTimeout(interactionTimeout);
     interactionTimeout = setTimeout(() => {
       isUserInteracting = false;
-    }, 800); // 800ms threshold window for scripts triggered by clicks
+    }, 800);
   }
 
   window.addEventListener('click', registerInteraction, { capture: true, passive: true });
@@ -43,16 +38,15 @@
   window.addEventListener('touchstart', registerInteraction, { capture: true, passive: true });
   window.addEventListener('mousedown', registerInteraction, { capture: true, passive: true });
 
-  // 2. Helper to log blocked redirect events and dispatch postMessage to isolated content script
+  // 2. Helper to log blocked redirect events and dispatch postMessage to content script
   function logBlocked(blockType, url) {
     const cleanUrl = url ? String(url).substring(0, 150) : 'unknown';
     
-    // Developer Debug Mode logging (Feature 9: Stack Trace analysis)
     if (config.debugMode) {
       const stack = new Error().stack;
       console.groupCollapsed(`%c[RedirectShield Debug] Blocked ${blockType}: ${cleanUrl}`, 'color: #ef4444; font-weight: bold;');
       console.warn(`Blocked Redirection Target: ${url}`);
-      console.info(`Global Status: Shield active, level: ${config.protectionLevel}`);
+      console.info(`Active Level: ${config.protectionLevel}`);
       console.log(`Script call stack trace:\n`, stack);
       console.groupEnd();
     } else if (config.consoleLogging) {
@@ -90,165 +84,233 @@
 
       if (currentHost === targetHost) return false;
 
-      // Allow subdomains matching
+      // Subdomains match check
       if (targetHost.endsWith('.' + currentHost) || currentHost.endsWith('.' + targetHost)) {
         return false;
       }
 
       return true;
     } catch (e) {
-      return false; // Safely treat unparseable urls as local
+      return false;
     }
   }
 
-  // 4. Decision engine to evaluate whether a URL redirection action should be blocked
-  function shouldBlockRedirect(urlStr) {
-    if (config.isBlacklisted) return true; // Extreme restriction on blacklisted sites
+  function getDomainName(urlStr) {
+    try {
+      const url = new URL(urlStr, window.location.href);
+      return url.hostname;
+    } catch (e) {
+      return '';
+    }
+  }
+
+  // Check custom styling indicative of button classes
+  function styleIsButton(el) {
+    if (!el || !el.getAttribute) return false;
+    const role = el.getAttribute('role');
+    if (role === 'button' || role === 'link') return true;
+    const klass = el.getAttribute('class');
+    if (klass && (klass.includes('btn') || klass.includes('button') || klass.includes('play'))) return true;
+    return false;
+  }
+
+  // 4. Advanced Redirect Classifier Heuristics
+  function shouldBlockRedirect(urlStr, actionType) {
+    if (!config.enabled || config.isWhitelisted) return false;
+    if (config.isBlacklisted) return true;
 
     const isExternal = isExternalUrl(urlStr);
+    if (!isExternal) return false; // Always allow local redirections
+
+    const isClickRecent = (Date.now() - lastClickTime) < 1000;
+    const isUserAction = isUserInteracting && isClickRecent && lastClickTrusted;
+
+    // Inspect if user clicked a legitimate trigger element
+    let isLegitTrigger = false;
+    if (isUserAction && lastClickTarget) {
+      let node = lastClickTarget;
+      while (node && node !== document) {
+        const tag = node.tagName ? node.tagName.toUpperCase() : '';
+        if (tag === 'A' || tag === 'BUTTON' || node.hasAttribute('onclick') || styleIsButton(node)) {
+          isLegitTrigger = true;
+          break;
+        }
+        node = node.parentNode;
+      }
+    }
+
+    // Known sharing/identity domains
+    const oauthProviders = [
+      'accounts.google.com', 'github.com', 'facebook.com', 'twitter.com',
+      'linkedin.com', 'appleid.apple.com', 'okta.com', 'auth0.com'
+    ];
+    const targetDomain = getDomainName(urlStr);
+    const isOAuth = oauthProviders.some(d => targetDomain === d || targetDomain.endsWith('.' + d));
 
     switch (config.protectionLevel) {
       case 'low':
-        return isExternal && !isUserInteracting;
-
-      case 'medium':
-        if (isExternal && !isUserInteracting) return true;
-        return false;
-
-      case 'high':
-        if (isExternal) {
-          if (!isUserInteracting) return true;
+        if (actionType === 'popup') {
+          return !isUserAction;
         }
         return false;
 
+      case 'medium':
+        // Block automatic pops/redirects, allow manual ones
+        return !isUserAction;
+
+      case 'high':
+        // Block automatic actions. For manual actions, block if clicked element isn't legitimate (click hijacking)
+        if (!isUserAction) return true;
+        if (isOAuth) return false; // Always permit logins
+        return !isLegitTrigger;
+
       case 'extreme':
-        if (isExternal) return true;
-        return !isUserInteracting;
+        // Strict shield. Blocks all external navigations.
+        if (isOAuth && isUserAction && isLegitTrigger) return false;
+        return true;
 
       default:
         return false;
     }
   }
 
-  // 5. Override window.open
+  // 5. Override APIs and save original references
   const originalOpen = window.open;
-  try {
-    window.open = function(url, name, specs) {
-      const targetUrl = url ? String(url) : 'about:blank';
-      if (shouldBlockRedirect(targetUrl)) {
-        logBlocked('popup', targetUrl);
-        return null;
+  const originalAssign = Location.prototype.assign;
+  const originalReplace = Location.prototype.replace;
+  const originalPushState = History.prototype.pushState;
+  const originalReplaceState = History.prototype.replaceState;
+  
+  let originalSetHref = null;
+  const hrefDescriptor = Object.getOwnPropertyDescriptor(Location.prototype, 'href');
+  if (hrefDescriptor && hrefDescriptor.set) {
+    originalSetHref = hrefDescriptor.set;
+  }
+
+  function applyOverrides() {
+    try {
+      window.open = function(url, name, specs) {
+        const targetUrl = url ? String(url) : 'about:blank';
+        if (shouldBlockRedirect(targetUrl, 'popup')) {
+          logBlocked('popup', targetUrl);
+          return null;
+        }
+        return originalOpen.apply(this, arguments);
+      };
+
+      Location.prototype.assign = function(url) {
+        const targetUrl = url ? String(url) : '';
+        if (shouldBlockRedirect(targetUrl, 'redirect')) {
+          logBlocked('redirect', targetUrl);
+          return;
+        }
+        return originalAssign.call(this, url);
+      };
+
+      Location.prototype.replace = function(url) {
+        const targetUrl = url ? String(url) : '';
+        if (shouldBlockRedirect(targetUrl, 'redirect')) {
+          logBlocked('redirect', targetUrl);
+          return;
+        }
+        return originalReplace.call(this, url);
+      };
+
+      if (originalSetHref) {
+        Object.defineProperty(Location.prototype, 'href', {
+          set: function(url) {
+            const targetUrl = url ? String(url) : '';
+            if (shouldBlockRedirect(targetUrl, 'redirect')) {
+              logBlocked('redirect', targetUrl);
+              return;
+            }
+            originalSetHref.call(this, url);
+          },
+          get: hrefDescriptor.get,
+          configurable: true,
+          enumerable: true
+        });
       }
-      return originalOpen.apply(this, arguments);
-    };
-  } catch (e) {
-    if (config.consoleLogging) {
-      console.error('[RedirectShield] Failed to hook window.open', e);
+
+      History.prototype.pushState = function(state, unused, url) {
+        const targetUrl = url ? String(url) : '';
+        if (targetUrl && shouldBlockRedirect(targetUrl, 'window')) {
+          logBlocked('window', targetUrl);
+          return;
+        }
+        return originalPushState.apply(this, arguments);
+      };
+
+      History.prototype.replaceState = function(state, unused, url) {
+        const targetUrl = url ? String(url) : '';
+        if (targetUrl && shouldBlockRedirect(targetUrl, 'window')) {
+          logBlocked('window', targetUrl);
+          return;
+        }
+        return originalReplaceState.apply(this, arguments);
+      };
+    } catch (e) {
+      console.error('[RedirectShield] Overrides installation failed.', e);
     }
   }
 
-  // 6. Hook Location prototype methods (assign & replace)
-  try {
-    const originalAssign = Location.prototype.assign;
-    Location.prototype.assign = function(url) {
-      const targetUrl = url ? String(url) : '';
-      if (shouldBlockRedirect(targetUrl)) {
-        logBlocked('redirect', targetUrl);
-        return;
-      }
-      return originalAssign.call(this, url);
-    };
-
-    const originalReplace = Location.prototype.replace;
-    Location.prototype.replace = function(url) {
-      const targetUrl = url ? String(url) : '';
-      if (shouldBlockRedirect(targetUrl)) {
-        logBlocked('redirect', targetUrl);
-        return;
-      }
-      return originalReplace.call(this, url);
-    };
-
-    const hrefDescriptor = Object.getOwnPropertyDescriptor(Location.prototype, 'href');
-    if (hrefDescriptor && hrefDescriptor.set) {
-      const originalSetHref = hrefDescriptor.set;
+  function restoreOriginals() {
+    window.open = originalOpen;
+    Location.prototype.assign = originalAssign;
+    Location.prototype.replace = originalReplace;
+    History.prototype.pushState = originalPushState;
+    History.prototype.replaceState = originalReplaceState;
+    if (originalSetHref) {
       Object.defineProperty(Location.prototype, 'href', {
-        set: function(url) {
-          const targetUrl = url ? String(url) : '';
-          if (shouldBlockRedirect(targetUrl)) {
-            logBlocked('redirect', targetUrl);
-            return;
-          }
-          originalSetHref.call(this, url);
-        },
-        get: hrefDescriptor.get,
+        set: originalSetHref,
         configurable: true,
         enumerable: true
       });
     }
-  } catch (e) {
-    if (config.consoleLogging) {
-      console.error('[RedirectShield] Failed to hook Location prototype.', e);
-    }
   }
 
-  // 7. Hook History state methods
-  try {
-    const originalPushState = History.prototype.pushState;
-    History.prototype.pushState = function(state, unused, url) {
-      const targetUrl = url ? String(url) : '';
-      if (targetUrl && shouldBlockRedirect(targetUrl)) {
-        logBlocked('window', targetUrl);
-        return;
-      }
-      return originalPushState.apply(this, arguments);
-    };
+  // Apply instantly at document_start
+  applyOverrides();
 
-    const originalReplaceState = History.prototype.replaceState;
-    History.prototype.replaceState = function(state, unused, url) {
-      const targetUrl = url ? String(url) : '';
-      if (targetUrl && shouldBlockRedirect(targetUrl)) {
-        logBlocked('window', targetUrl);
-        return;
+  // Listen for config sync updates from content script
+  window.addEventListener('message', (e) => {
+    if (e.source !== window) return;
+    if (e.data && e.data.type === 'REDIRECT_SHIELD_CONFIG_UPDATE') {
+      config = e.data.config;
+      
+      // If whitelisted or disabled, restore original hooks to remove extensions overhead
+      if (!config.enabled || config.isWhitelisted) {
+        restoreOriginals();
       }
-      return originalReplaceState.apply(this, arguments);
-    };
-  } catch (e) {
-    if (config.consoleLogging) {
-      console.error('[RedirectShield] Failed to hook History prototype.', e);
     }
-  }
+  });
 
-  // 8. Dynamic document clicks intercept (capture phase)
+  // Capture target=_blank conversion logic
   document.addEventListener('click', function(event) {
+    if (!config.enabled || config.isWhitelisted) return;
+    
     let target = event.target;
-
     while (target && target !== document) {
       const tagName = target.tagName ? target.tagName.toUpperCase() : '';
-      
       if (tagName === 'A' && target.target === '_blank') {
         const href = target.href || target.getAttribute('href');
-        if (isExternalUrl(href)) {
-          if (config.protectionLevel !== 'low') {
-            target.target = '_self';
-            if (config.consoleLogging) {
-              console.log(`[RedirectShield] Converted target="_blank" to "_self" for external URL: ${href}`);
-            }
+        if (isExternalUrl(href) && config.protectionLevel !== 'low') {
+          target.target = '_self';
+          if (config.consoleLogging) {
+            console.log(`[RedirectShield] Converted target="_blank" to "_self" for external URL: ${href}`);
           }
         }
       }
 
       if (tagName === 'A' || tagName === 'AREA' || target.hasAttribute('onclick')) {
         const href = target.href || target.getAttribute('href');
-        
-        if (href && shouldBlockRedirect(href)) {
+        if (href && shouldBlockRedirect(href, 'redirect')) {
           event.preventDefault();
           event.stopPropagation();
           logBlocked('redirect', href);
           return;
         }
       }
-      
       target = target.parentNode;
     }
   }, true);

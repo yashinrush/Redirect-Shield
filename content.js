@@ -1,7 +1,7 @@
 /**
  * Redirect Shield - Content Script
- * Runs at document_start. Requests unified tab configurations from background,
- * executes main-world script injection, runs cleanups, and generates toast notifications.
+ * Runs at document_start. Instantly and synchronously injects main-world intercepts
+ * to eliminate race conditions, queries configurations asynchronously, and runs DOM cleanups.
  */
 
 (function() {
@@ -9,33 +9,334 @@
   let activeConfig = null;
   let throttleTimeout = null;
 
-  // 1. Fetch tab-specific computed configurations from background worker
+  // Inlined code from inject.js to guarantee synchronous execution before any page scripts load
+  const mainWorldCode = `
+(function() {
+  let config = {
+    enabled: true,
+    protectionLevel: 'high',
+    isWhitelisted: false,
+    isBlacklisted: false,
+    consoleLogging: true,
+    debugMode: false
+  };
+
+  let lastClickTarget = null;
+  let lastClickTime = 0;
+  let lastClickTrusted = false;
+  let isUserInteracting = false;
+  let interactionTimeout = null;
+
+  function registerInteraction(e) {
+    isUserInteracting = true;
+    lastClickTime = Date.now();
+    lastClickTrusted = e.isTrusted !== false;
+    lastClickTarget = e.target;
+
+    if (interactionTimeout) clearTimeout(interactionTimeout);
+    interactionTimeout = setTimeout(() => {
+      isUserInteracting = false;
+    }, 800);
+  }
+
+  window.addEventListener('click', registerInteraction, { capture: true, passive: true });
+  window.addEventListener('keydown', registerInteraction, { capture: true, passive: true });
+  window.addEventListener('touchstart', registerInteraction, { capture: true, passive: true });
+  window.addEventListener('mousedown', registerInteraction, { capture: true, passive: true });
+
+  function logBlocked(blockType, url) {
+    const cleanUrl = url ? String(url).substring(0, 150) : 'unknown';
+    
+    if (config.debugMode) {
+      const stack = new Error().stack;
+      console.groupCollapsed('%c[RedirectShield Debug] Blocked ' + blockType + ': ' + cleanUrl, 'color: #ef4444; font-weight: bold;');
+      console.warn('Blocked Redirection Target: ' + url);
+      console.info('Active Level: ' + config.protectionLevel);
+      console.log('Script call stack trace:\\n', stack);
+      console.groupEnd();
+    } else if (config.consoleLogging) {
+      console.warn('%c[RedirectShield] Blocked ' + blockType + ': ' + cleanUrl, 'color: #ef4444; font-weight: bold;');
+    }
+
+    window.postMessage({
+      type: 'REDIRECT_SHIELD_BLOCKED_EVENT_MAIN',
+      detail: {
+        blockType: blockType,
+        blockedUrl: cleanUrl,
+        sourceDomain: window.location.hostname
+      }
+    }, '*');
+  }
+
+  function isExternalUrl(urlStr) {
+    try {
+      if (!urlStr) return false;
+      const urlStrTrim = String(urlStr).trim();
+      if (
+        urlStrTrim.startsWith('/') ||
+        urlStrTrim.startsWith('.') ||
+        urlStrTrim.startsWith('#') ||
+        urlStrTrim.toLowerCase().startsWith('javascript:') ||
+        urlStrTrim.toLowerCase().startsWith('mailto:') ||
+        urlStrTrim.toLowerCase().startsWith('tel:')
+      ) {
+        return false;
+      }
+      const url = new URL(urlStrTrim, window.location.href);
+      const currentHost = window.location.hostname;
+      const targetHost = url.hostname;
+
+      if (currentHost === targetHost) return false;
+
+      if (targetHost.endsWith('.' + currentHost) || currentHost.endsWith('.' + targetHost)) {
+        return false;
+      }
+
+      return true;
+    } catch (e) {
+      return false;
+    }
+  }
+
+  function getDomainName(urlStr) {
+    try {
+      const url = new URL(urlStr, window.location.href);
+      return url.hostname;
+    } catch (e) {
+      return '';
+    }
+  }
+
+  function styleIsButton(el) {
+    if (!el || !el.getAttribute) return false;
+    const role = el.getAttribute('role');
+    if (role === 'button' || role === 'link') return true;
+    const klass = el.getAttribute('class');
+    if (klass && (klass.includes('btn') || klass.includes('button') || klass.includes('play'))) return true;
+    return false;
+  }
+
+  function shouldBlockRedirect(urlStr, actionType) {
+    if (!config.enabled || config.isWhitelisted) return false;
+    if (config.isBlacklisted) return true;
+
+    const isExternal = isExternalUrl(urlStr);
+    if (!isExternal) return false;
+
+    const isClickRecent = (Date.now() - lastClickTime) < 1000;
+    const isUserAction = isUserInteracting && isClickRecent && lastClickTrusted;
+
+    let isLegitTrigger = false;
+    if (isUserAction && lastClickTarget) {
+      let node = lastClickTarget;
+      while (node && node !== document) {
+        const tag = node.tagName ? node.tagName.toUpperCase() : '';
+        if (tag === 'A' || tag === 'BUTTON' || node.hasAttribute('onclick') || styleIsButton(node)) {
+          isLegitTrigger = true;
+          break;
+        }
+        node = node.parentNode;
+      }
+    }
+
+    const oauthProviders = [
+      'accounts.google.com', 'github.com', 'facebook.com', 'twitter.com',
+      'linkedin.com', 'appleid.apple.com', 'okta.com', 'auth0.com'
+    ];
+    const targetDomain = getDomainName(urlStr);
+    const isOAuth = oauthProviders.some(function(d) {
+      return targetDomain === d || targetDomain.endsWith('.' + d);
+    });
+
+    switch (config.protectionLevel) {
+      case 'low':
+        if (actionType === 'popup') {
+          return !isUserAction;
+        }
+        return false;
+
+      case 'medium':
+        return !isUserAction;
+
+      case 'high':
+        if (!isUserAction) return true;
+        if (isOAuth) return false;
+        return !isLegitTrigger;
+
+      case 'extreme':
+        if (isOAuth && isUserAction && isLegitTrigger) return false;
+        return true;
+
+      default:
+        return false;
+    }
+  }
+
+  const originalOpen = window.open;
+  const originalAssign = Location.prototype.assign;
+  const originalReplace = Location.prototype.replace;
+  const originalPushState = History.prototype.pushState;
+  const originalReplaceState = History.prototype.replaceState;
+  
+  let originalSetHref = null;
+  const hrefDescriptor = Object.getOwnPropertyDescriptor(Location.prototype, 'href');
+  if (hrefDescriptor && hrefDescriptor.set) {
+    originalSetHref = hrefDescriptor.set;
+  }
+
+  function applyOverrides() {
+    try {
+      window.open = function(url, name, specs) {
+        const targetUrl = url ? String(url) : 'about:blank';
+        if (shouldBlockRedirect(targetUrl, 'popup')) {
+          logBlocked('popup', targetUrl);
+          return null;
+        }
+        return originalOpen.apply(this, arguments);
+      };
+
+      Location.prototype.assign = function(url) {
+        const targetUrl = url ? String(url) : '';
+        if (shouldBlockRedirect(targetUrl, 'redirect')) {
+          logBlocked('redirect', targetUrl);
+          return;
+        }
+        return originalAssign.call(this, url);
+      };
+
+      Location.prototype.replace = function(url) {
+        const targetUrl = url ? String(url) : '';
+        if (shouldBlockRedirect(targetUrl, 'redirect')) {
+          logBlocked('redirect', targetUrl);
+          return;
+        }
+        return originalReplace.call(this, url);
+      };
+
+      if (originalSetHref) {
+        Object.defineProperty(Location.prototype, 'href', {
+          set: function(url) {
+            const targetUrl = url ? String(url) : '';
+            if (shouldBlockRedirect(targetUrl, 'redirect')) {
+              logBlocked('redirect', targetUrl);
+              return;
+            }
+            originalSetHref.call(this, url);
+          },
+          get: hrefDescriptor.get,
+          configurable: true,
+          enumerable: true
+        });
+      }
+
+      History.prototype.pushState = function(state, unused, url) {
+        const targetUrl = url ? String(url) : '';
+        if (targetUrl && shouldBlockRedirect(targetUrl, 'window')) {
+          logBlocked('window', targetUrl);
+          return;
+        }
+        return originalPushState.apply(this, arguments);
+      };
+
+      History.prototype.replaceState = function(state, unused, url) {
+        const targetUrl = url ? String(url) : '';
+        if (targetUrl && shouldBlockRedirect(targetUrl, 'window')) {
+          logBlocked('window', targetUrl);
+          return;
+        }
+        return originalReplaceState.apply(this, arguments);
+      };
+    } catch (e) {
+      console.error('[RedirectShield] Overrides installation failed.', e);
+    }
+  }
+
+  function restoreOriginals() {
+    window.open = originalOpen;
+    Location.prototype.assign = originalAssign;
+    Location.prototype.replace = originalReplace;
+    History.prototype.pushState = originalPushState;
+    History.prototype.replaceState = originalReplaceState;
+    if (originalSetHref) {
+      Object.defineProperty(Location.prototype, 'href', {
+        set: originalSetHref,
+        configurable: true,
+        enumerable: true
+      });
+    }
+  }
+
+  applyOverrides();
+
+  window.addEventListener('message', function(e) {
+    if (e.source !== window) return;
+    if (e.data && e.data.type === 'REDIRECT_SHIELD_CONFIG_UPDATE') {
+      config = e.data.config;
+      if (!config.enabled || config.isWhitelisted) {
+        restoreOriginals();
+      }
+    }
+  });
+
+  document.addEventListener('click', function(event) {
+    if (!config.enabled || config.isWhitelisted) return;
+    
+    let target = event.target;
+    while (target && target !== document) {
+      const tagName = target.tagName ? target.tagName.toUpperCase() : '';
+      if (tagName === 'A' && target.target === '_blank') {
+        const href = target.href || target.getAttribute('href');
+        if (isExternalUrl(href) && config.protectionLevel !== 'low') {
+          target.target = '_self';
+          if (config.consoleLogging) {
+            console.log('[RedirectShield] Converted target="_blank" to "_self" for external URL: ' + href);
+          }
+        }
+      }
+
+      if (tagName === 'A' || tagName === 'AREA' || target.hasAttribute('onclick')) {
+        const href = target.href || target.getAttribute('href');
+        if (href && shouldBlockRedirect(href, 'redirect')) {
+          event.preventDefault();
+          event.stopPropagation();
+          logBlocked('redirect', href);
+          return;
+        }
+      }
+      target = target.parentNode;
+    }
+  }, true);
+
+})();
+`;
+
+  // 1. Instantly inject the blocker in the main world (eliminates async load race conditions)
+  try {
+    const script = document.createElement('script');
+    script.textContent = mainWorldCode;
+    (document.head || document.documentElement).appendChild(script);
+    script.remove();
+  } catch (err) {
+    console.error('[RedirectShield] Synchronous content injection failed.', err);
+  }
+
+  // 2. Fetch configurations asynchronously from background service worker
   chrome.runtime.sendMessage({
     type: 'REDIRECT_SHIELD_GET_TAB_CONFIG',
     url: window.location.href
   }, (response) => {
-    if (!response) {
-      console.warn('[RedirectShield] Failed to retrieve settings config from background worker.');
-      return;
-    }
+    if (!response) return;
 
     activeConfig = response;
 
-    // If disabled, bypassed, or whitelisted, stop executions
-    if (!activeConfig.enabled) {
-      if (activeConfig.consoleLogging && activeConfig.isWhitelisted) {
-        console.log(`[RedirectShield] Domain whitelisted: ${currentHost}`);
-      } else if (activeConfig.consoleLogging && activeConfig.isTabPaused) {
-        console.log(`[RedirectShield] Protection paused for this tab session.`);
-      }
-      return;
-    }
+    // Send updated configurations to the main world
+    window.postMessage({
+      type: 'REDIRECT_SHIELD_CONFIG_UPDATE',
+      config: response
+    }, '*');
 
-    // 2. Inject main-world configuration variables and action scripts
-    injectMainScript();
-
-    // 3. Setup dynamic MutationObserver for overlays and containers removal
-    if (activeConfig.autoRemoveOverlays) {
+    // Run cleanups if enabled
+    if (activeConfig.enabled && activeConfig.autoRemoveOverlays) {
       setupMutationObserver();
       if (document.readyState === 'loading') {
         document.addEventListener('DOMContentLoaded', performDOMCleanup);
@@ -44,36 +345,6 @@
       }
     }
   });
-
-  // Inject configurations and main-world scripts
-  function injectMainScript() {
-    try {
-      const configObj = {
-        enabled: activeConfig.enabled,
-        protectionLevel: activeConfig.protectionLevel,
-        isWhitelisted: activeConfig.isWhitelisted,
-        isBlacklisted: activeConfig.isBlacklisted,
-        consoleLogging: activeConfig.consoleLogging,
-        debugMode: activeConfig.debugMode
-      };
-
-      // Injects config properties onto window object in target world
-      const configScript = document.createElement('script');
-      configScript.textContent = `window.__REDIRECT_SHIELD_CONFIG__ = ${JSON.stringify(configObj)};`;
-      (document.head || document.documentElement).appendChild(configScript);
-      configScript.remove();
-
-      // Injects main-world scripts
-      const injectScript = document.createElement('script');
-      injectScript.src = chrome.runtime.getURL('inject.js');
-      injectScript.onload = function() {
-        this.remove();
-      };
-      (document.head || document.documentElement).appendChild(injectScript);
-    } catch (e) {
-      console.error('[RedirectShield] Main-world injection script failed.', e);
-    }
-  }
 
   // Setup efficient MutationObserver using throttling
   function setupMutationObserver() {
@@ -235,13 +506,11 @@
     if (event.data && event.data.type === 'REDIRECT_SHIELD_BLOCKED_EVENT_MAIN') {
       const details = event.data.detail;
 
-      // Send to background service worker for stats tracking
       chrome.runtime.sendMessage({
         type: 'REDIRECT_SHIELD_BLOCKED_EVENT',
         detail: details
       });
 
-      // Show toast block alert
       if (activeConfig && activeConfig.showToasts) {
         showBlockedToast(details.blockedUrl, details.blockType);
       }
@@ -251,7 +520,7 @@
   // Listen for state change events from background page
   chrome.runtime.onMessage.addListener((message) => {
     if (message.type === 'REDIRECT_SHIELD_STATE_CHANGED') {
-      window.location.reload(); // Reload page to update configs
+      window.location.reload();
     }
   });
 
