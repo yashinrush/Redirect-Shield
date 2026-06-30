@@ -135,7 +135,7 @@
           isLegitTrigger = true;
           break;
         }
-        node = node.parentNode;
+        node = node.parentNode || node.host;
       }
     }
 
@@ -177,11 +177,22 @@
   const originalReplace = Location.prototype.replace;
   const originalPushState = History.prototype.pushState;
   const originalReplaceState = History.prototype.replaceState;
+  const originalAnchorClick = HTMLAnchorElement.prototype.click;
+  const originalAreaClick = HTMLAreaElement.prototype.click;
+  const originalSubmit = HTMLFormElement.prototype.submit;
   
   let originalSetHref = null;
   const hrefDescriptor = Object.getOwnPropertyDescriptor(Location.prototype, 'href');
   if (hrefDescriptor && hrefDescriptor.set) {
     originalSetHref = hrefDescriptor.set;
+  }
+
+  function onNavigate(event) {
+    const targetUrl = event.destination.url;
+    if (shouldBlockRedirect(targetUrl, 'redirect')) {
+      event.preventDefault();
+      logBlocked('navigation', targetUrl);
+    }
   }
 
   function applyOverrides() {
@@ -246,6 +257,37 @@
         }
         return originalReplaceState.apply(this, arguments);
       };
+
+      HTMLAnchorElement.prototype.click = function() {
+        const href = this.href || this.getAttribute('href');
+        if (href && shouldBlockRedirect(href, 'redirect')) {
+          logBlocked('anchor click bypass', href);
+          return;
+        }
+        return originalAnchorClick.apply(this, arguments);
+      };
+
+      HTMLAreaElement.prototype.click = function() {
+        const href = this.href || this.getAttribute('href');
+        if (href && shouldBlockRedirect(href, 'redirect')) {
+          logBlocked('area click bypass', href);
+          return;
+        }
+        return originalAreaClick.apply(this, arguments);
+      };
+
+      HTMLFormElement.prototype.submit = function() {
+        const action = this.action || this.getAttribute('action');
+        if (action && shouldBlockRedirect(action, 'redirect')) {
+          logBlocked('form submit', action);
+          return;
+        }
+        return originalSubmit.apply(this, arguments);
+      };
+
+      if (typeof navigation !== 'undefined') {
+        navigation.addEventListener('navigate', onNavigate);
+      }
     } catch (e) {
       console.error('[RedirectShield] Overrides installation failed.', e);
     }
@@ -257,12 +299,20 @@
     Location.prototype.replace = originalReplace;
     History.prototype.pushState = originalPushState;
     History.prototype.replaceState = originalReplaceState;
+    HTMLAnchorElement.prototype.click = originalAnchorClick;
+    HTMLAreaElement.prototype.click = originalAreaClick;
+    HTMLFormElement.prototype.submit = originalSubmit;
+    
     if (originalSetHref) {
       Object.defineProperty(Location.prototype, 'href', {
         set: originalSetHref,
         configurable: true,
         enumerable: true
       });
+    }
+
+    if (typeof navigation !== 'undefined') {
+      navigation.removeEventListener('navigate', onNavigate);
     }
   }
 
@@ -303,7 +353,7 @@
           return;
         }
       }
-      target = target.parentNode;
+      target = target.parentNode || target.host;
     }
   }, true);
 

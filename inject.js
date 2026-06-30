@@ -24,7 +24,7 @@
   function registerInteraction(e) {
     isUserInteracting = true;
     lastClickTime = Date.now();
-    lastClickTrusted = e.isTrusted !== false; // Check for programmatic click event dispatching
+    lastClickTrusted = e.isTrusted !== false;
     lastClickTarget = e.target;
 
     if (interactionTimeout) clearTimeout(interactionTimeout);
@@ -125,7 +125,7 @@
     const isClickRecent = (Date.now() - lastClickTime) < 1000;
     const isUserAction = isUserInteracting && isClickRecent && lastClickTrusted;
 
-    // Inspect if user clicked a legitimate trigger element
+    // Inspect if user clicked a legitimate trigger element (supports Shadow DOM traversal)
     let isLegitTrigger = false;
     if (isUserAction && lastClickTarget) {
       let node = lastClickTarget;
@@ -135,7 +135,8 @@
           isLegitTrigger = true;
           break;
         }
-        node = node.parentNode;
+        // Support traversing Shadow DOM boundaries
+        node = node.parentNode || node.host;
       }
     }
 
@@ -155,17 +156,14 @@
         return false;
 
       case 'medium':
-        // Block automatic pops/redirects, allow manual ones
         return !isUserAction;
 
       case 'high':
-        // Block automatic actions. For manual actions, block if clicked element isn't legitimate (click hijacking)
         if (!isUserAction) return true;
         if (isOAuth) return false; // Always permit logins
         return !isLegitTrigger;
 
       case 'extreme':
-        // Strict shield. Blocks all external navigations.
         if (isOAuth && isUserAction && isLegitTrigger) return false;
         return true;
 
@@ -180,6 +178,9 @@
   const originalReplace = Location.prototype.replace;
   const originalPushState = History.prototype.pushState;
   const originalReplaceState = History.prototype.replaceState;
+  const originalAnchorClick = HTMLAnchorElement.prototype.click;
+  const originalAreaClick = HTMLAreaElement.prototype.click;
+  const originalSubmit = HTMLFormElement.prototype.submit;
   
   let originalSetHref = null;
   const hrefDescriptor = Object.getOwnPropertyDescriptor(Location.prototype, 'href');
@@ -187,8 +188,18 @@
     originalSetHref = hrefDescriptor.set;
   }
 
+  // Event listener function for Navigation API
+  function onNavigate(event) {
+    const targetUrl = event.destination.url;
+    if (shouldBlockRedirect(targetUrl, 'redirect')) {
+      event.preventDefault();
+      logBlocked('navigation', targetUrl);
+    }
+  }
+
   function applyOverrides() {
     try {
+      // Intercept window.open
       window.open = function(url, name, specs) {
         const targetUrl = url ? String(url) : 'about:blank';
         if (shouldBlockRedirect(targetUrl, 'popup')) {
@@ -198,6 +209,7 @@
         return originalOpen.apply(this, arguments);
       };
 
+      // Intercept Location assign
       Location.prototype.assign = function(url) {
         const targetUrl = url ? String(url) : '';
         if (shouldBlockRedirect(targetUrl, 'redirect')) {
@@ -207,6 +219,7 @@
         return originalAssign.call(this, url);
       };
 
+      // Intercept Location replace
       Location.prototype.replace = function(url) {
         const targetUrl = url ? String(url) : '';
         if (shouldBlockRedirect(targetUrl, 'redirect')) {
@@ -216,6 +229,7 @@
         return originalReplace.call(this, url);
       };
 
+      // Intercept Location href changes
       if (originalSetHref) {
         Object.defineProperty(Location.prototype, 'href', {
           set: function(url) {
@@ -232,6 +246,7 @@
         });
       }
 
+      // Intercept History pushes
       History.prototype.pushState = function(state, unused, url) {
         const targetUrl = url ? String(url) : '';
         if (targetUrl && shouldBlockRedirect(targetUrl, 'window')) {
@@ -249,6 +264,40 @@
         }
         return originalReplaceState.apply(this, arguments);
       };
+
+      // Intercept disconnected DOM click triggers (Feature 18: Dynamic & Cross-Origin pages)
+      HTMLAnchorElement.prototype.click = function() {
+        const href = this.href || this.getAttribute('href');
+        if (href && shouldBlockRedirect(href, 'redirect')) {
+          logBlocked('anchor click bypass', href);
+          return;
+        }
+        return originalAnchorClick.apply(this, arguments);
+      };
+
+      HTMLAreaElement.prototype.click = function() {
+        const href = this.href || this.getAttribute('href');
+        if (href && shouldBlockRedirect(href, 'redirect')) {
+          logBlocked('area click bypass', href);
+          return;
+        }
+        return originalAreaClick.apply(this, arguments);
+      };
+
+      // Intercept programmatic form submissions
+      HTMLFormElement.prototype.submit = function() {
+        const action = this.action || this.getAttribute('action');
+        if (action && shouldBlockRedirect(action, 'redirect')) {
+          logBlocked('form submit', action);
+          return;
+        }
+        return originalSubmit.apply(this, arguments);
+      };
+
+      // Integrate modern Chrome Navigation API (resolves direct location = "url" bypasses)
+      if (typeof navigation !== 'undefined') {
+        navigation.addEventListener('navigate', onNavigate);
+      }
     } catch (e) {
       console.error('[RedirectShield] Overrides installation failed.', e);
     }
@@ -260,6 +309,10 @@
     Location.prototype.replace = originalReplace;
     History.prototype.pushState = originalPushState;
     History.prototype.replaceState = originalReplaceState;
+    HTMLAnchorElement.prototype.click = originalAnchorClick;
+    HTMLAreaElement.prototype.click = originalAreaClick;
+    HTMLFormElement.prototype.submit = originalSubmit;
+    
     if (originalSetHref) {
       Object.defineProperty(Location.prototype, 'href', {
         set: originalSetHref,
@@ -267,9 +320,13 @@
         enumerable: true
       });
     }
+
+    if (typeof navigation !== 'undefined') {
+      navigation.removeEventListener('navigate', onNavigate);
+    }
   }
 
-  // Apply instantly at document_start
+  // Apply hooks instantly at document_start
   applyOverrides();
 
   // Listen for config sync updates from content script
@@ -285,7 +342,7 @@
     }
   });
 
-  // Capture target=_blank conversion logic
+  // Capture target=_blank conversion logic and link intercepts
   document.addEventListener('click', function(event) {
     if (!config.enabled || config.isWhitelisted) return;
     
@@ -311,7 +368,7 @@
           return;
         }
       }
-      target = target.parentNode;
+      target = target.parentNode || target.host;
     }
   }, true);
 
