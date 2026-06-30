@@ -1,66 +1,42 @@
 /**
  * Redirect Shield - Content Script
- * Runs at document_start. Reads configuration, injects main-world script,
- * intercepts and cleans overlays, and renders Shadow-DOM toast notifications.
+ * Runs at document_start. Requests unified tab configurations from background,
+ * executes main-world script injection, runs cleanups, and generates toast notifications.
  */
 
 (function() {
   const currentHost = window.location.hostname;
   let activeConfig = null;
-  let isWhitelisted = false;
-  let isBlacklisted = false;
   let throttleTimeout = null;
 
-  // Match domain in whitelist/blacklist
-  function matchDomainList(list, host) {
-    if (!list) return false;
-    const cleanHost = host.toLowerCase().trim();
-    return list.some(item => {
-      const pattern = item.toLowerCase().trim();
-      if (!pattern) return false;
-      return cleanHost === pattern || cleanHost.endsWith('.' + pattern);
-    });
-  }
+  // 1. Fetch tab-specific computed configurations from background worker
+  chrome.runtime.sendMessage({
+    type: 'REDIRECT_SHIELD_GET_TAB_CONFIG',
+    url: window.location.href
+  }, (response) => {
+    if (!response) {
+      console.warn('[RedirectShield] Failed to retrieve settings config from background worker.');
+      return;
+    }
 
-  // Load configuration and run script injection
-  chrome.storage.local.get([
-    'enabled',
-    'protectionLevel',
-    'whitelist',
-    'blacklist',
-    'showToasts',
-    'consoleLogging',
-    'autoRemoveOverlays'
-  ], (result) => {
-    // Fill defaults if storage not yet initialized
-    activeConfig = {
-      enabled: result.enabled !== false,
-      protectionLevel: result.protectionLevel || 'high',
-      whitelist: result.whitelist || [],
-      blacklist: result.blacklist || [],
-      showToasts: result.showToasts !== false,
-      consoleLogging: result.consoleLogging !== false,
-      autoRemoveOverlays: result.autoRemoveOverlays !== false
-    };
+    activeConfig = response;
 
-    isWhitelisted = matchDomainList(activeConfig.whitelist, currentHost);
-    isBlacklisted = matchDomainList(activeConfig.blacklist, currentHost);
-
-    // If disabled or whitelisted, we do not inject blocking code or run observers
-    if (!activeConfig.enabled || isWhitelisted) {
-      if (activeConfig.consoleLogging) {
-        console.log(`[RedirectShield] Protection inactive on ${currentHost}`);
+    // If disabled, bypassed, or whitelisted, stop executions
+    if (!activeConfig.enabled) {
+      if (activeConfig.consoleLogging && activeConfig.isWhitelisted) {
+        console.log(`[RedirectShield] Domain whitelisted: ${currentHost}`);
+      } else if (activeConfig.consoleLogging && activeConfig.isTabPaused) {
+        console.log(`[RedirectShield] Protection paused for this tab session.`);
       }
       return;
     }
 
-    // 1. Inject configurations and main execution script
+    // 2. Inject main-world configuration variables and action scripts
     injectMainScript();
 
-    // 2. Setup dynamic MutationObserver for dynamic ads and click-jacking overlays
+    // 3. Setup dynamic MutationObserver for overlays and containers removal
     if (activeConfig.autoRemoveOverlays) {
       setupMutationObserver();
-      // Run initial check once DOM is ready
       if (document.readyState === 'loading') {
         document.addEventListener('DOMContentLoaded', performDOMCleanup);
       } else {
@@ -69,37 +45,37 @@
     }
   });
 
-  // Inject config object and main-world scripts
+  // Inject configurations and main-world scripts
   function injectMainScript() {
     try {
       const configObj = {
         enabled: activeConfig.enabled,
         protectionLevel: activeConfig.protectionLevel,
-        isWhitelisted: isWhitelisted,
-        isBlacklisted: isBlacklisted,
-        consoleLogging: activeConfig.consoleLogging
+        isWhitelisted: activeConfig.isWhitelisted,
+        isBlacklisted: activeConfig.isBlacklisted,
+        consoleLogging: activeConfig.consoleLogging,
+        debugMode: activeConfig.debugMode
       };
 
-      // Create configuration tag
+      // Injects config properties onto window object in target world
       const configScript = document.createElement('script');
       configScript.textContent = `window.__REDIRECT_SHIELD_CONFIG__ = ${JSON.stringify(configObj)};`;
       (document.head || document.documentElement).appendChild(configScript);
       configScript.remove();
 
-      // Create inject.js script reference
+      // Injects main-world scripts
       const injectScript = document.createElement('script');
       injectScript.src = chrome.runtime.getURL('inject.js');
-      // Self cleanup
       injectScript.onload = function() {
         this.remove();
       };
       (document.head || document.documentElement).appendChild(injectScript);
     } catch (e) {
-      console.error('[RedirectShield] Injected script execution failed.', e);
+      console.error('[RedirectShield] Main-world injection script failed.', e);
     }
   }
 
-  // Setup efficient MutationObserver using throttling to prevent layout thrashing
+  // Setup efficient MutationObserver using throttling
   function setupMutationObserver() {
     const observer = new MutationObserver((mutations) => {
       let isNodeAdded = false;
@@ -126,21 +102,19 @@
     throttleTimeout = setTimeout(() => {
       performDOMCleanup();
       throttleTimeout = null;
-    }, 400); // Execute at most once every 400ms
+    }, 400);
   }
 
   // Identifies and cleans click hijacking overlays and dynamic ads
   function performDOMCleanup() {
-    if (!activeConfig || !activeConfig.enabled || isWhitelisted) return;
+    if (!activeConfig || !activeConfig.enabled) return;
 
     const level = activeConfig.protectionLevel;
     
-    // High and Extreme levels remove invisible clickable overlays
     if (level === 'high' || level === 'extreme') {
       removeInvisibleOverlays();
     }
     
-    // Medium, High and Extreme scan for known advertising containers
     if (level !== 'low') {
       removeCommonAdElements();
     }
@@ -148,13 +122,11 @@
 
   // Identifies fixed/absolute transparent overlays spanning the browser window
   function removeInvisibleOverlays() {
-    // Query divs and sections
     const elements = document.querySelectorAll('div, section, span, a');
     const vw = window.innerWidth;
     const vh = window.innerHeight;
 
     elements.forEach(element => {
-      // Exclude document structural layers
       if (element === document.body || element === document.documentElement || element.id === 'redirect-shield-toast-container') {
         return;
       }
@@ -164,7 +136,6 @@
         const position = style.position;
         if (position !== 'fixed' && position !== 'absolute') return;
 
-        // Check for overlay sizes covering most of the viewport
         const width = element.offsetWidth;
         const height = element.offsetHeight;
         
@@ -175,9 +146,8 @@
         if (!isSpanning) return;
 
         const zIndex = parseInt(style.zIndex, 10);
-        if (isNaN(zIndex) || zIndex < 90) return; // Only process high-stack overlays
+        if (isNaN(zIndex) || zIndex < 90) return;
 
-        // Determine if overlay is transparent
         const bg = style.backgroundColor;
         const opacity = parseFloat(style.opacity);
         
@@ -188,19 +158,16 @@
         const hasPointerEvents = style.pointerEvents !== 'none';
 
         if (isTransparent && hasPointerEvents) {
-          // Check that overlay has minimal content (indicative of ad overlays)
           const textLength = element.textContent.trim().length;
           const childInputsCount = element.querySelectorAll('input, button, select, textarea').length;
           
           if (textLength < 60 && childInputsCount === 0) {
             element.remove();
             
-            // Log to console if logging enabled
             if (activeConfig.consoleLogging) {
               console.log(`[RedirectShield] Removed invisible click-hijack overlay (z-index: ${zIndex})`);
             }
 
-            // Report blocked event to background
             chrome.runtime.sendMessage({
               type: 'REDIRECT_SHIELD_BLOCKED_EVENT',
               detail: {
@@ -212,7 +179,7 @@
           }
         }
       } catch (err) {
-        // Fail silently to prevent site issues
+        // Fail silently
       }
     });
   }
@@ -237,7 +204,6 @@
     try {
       const elements = document.querySelectorAll(adSelectors.join(','));
       elements.forEach(element => {
-        // Shield ourselves from removing container nodes of the extension itself
         if (element.id === 'redirect-shield-toast-container' || element.closest('#redirect-shield-toast-container')) {
           return;
         }
@@ -285,11 +251,11 @@
   // Listen for state change events from background page
   chrome.runtime.onMessage.addListener((message) => {
     if (message.type === 'REDIRECT_SHIELD_STATE_CHANGED') {
-      window.location.reload(); // Reload webpage to apply/remove shields instantly
+      window.location.reload(); // Reload page to update configs
     }
   });
 
-  // Renders toast notification using a Shadow DOM container
+  // Renders shadow-DOM toast notifications
   let toastContainer = null;
   function showBlockedToast(url, type) {
     if (!toastContainer) {
@@ -387,12 +353,10 @@
 
     shadow.appendChild(toast);
 
-    // Trigger CSS slide-in
     setTimeout(() => {
       toast.classList.add('show');
     }, 15);
 
-    // Auto cleanup toast DOM after 3 seconds
     setTimeout(() => {
       toast.classList.remove('show');
       setTimeout(() => {

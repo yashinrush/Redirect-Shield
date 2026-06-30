@@ -10,7 +10,8 @@
     protectionLevel: 'high',
     isWhitelisted: false,
     isBlacklisted: false,
-    consoleLogging: true
+    consoleLogging: true,
+    debugMode: false
   };
 
   // If extension disabled or site is whitelisted, skip overrides
@@ -45,9 +46,19 @@
   // 2. Helper to log blocked redirect events and dispatch postMessage to isolated content script
   function logBlocked(blockType, url) {
     const cleanUrl = url ? String(url).substring(0, 150) : 'unknown';
-    if (config.consoleLogging) {
+    
+    // Developer Debug Mode logging (Feature 9: Stack Trace analysis)
+    if (config.debugMode) {
+      const stack = new Error().stack;
+      console.groupCollapsed(`%c[RedirectShield Debug] Blocked ${blockType}: ${cleanUrl}`, 'color: #ef4444; font-weight: bold;');
+      console.warn(`Blocked Redirection Target: ${url}`);
+      console.info(`Global Status: Shield active, level: ${config.protectionLevel}`);
+      console.log(`Script call stack trace:\n`, stack);
+      console.groupEnd();
+    } else if (config.consoleLogging) {
       console.warn(`%c[RedirectShield] Blocked ${blockType}: ${cleanUrl}`, 'color: #ef4444; font-weight: bold;');
     }
+
     window.postMessage({
       type: 'REDIRECT_SHIELD_BLOCKED_EVENT_MAIN',
       detail: {
@@ -98,23 +109,19 @@
 
     switch (config.protectionLevel) {
       case 'low':
-        // Only block popups / new window links executed without user click interaction
         return isExternal && !isUserInteracting;
 
       case 'medium':
-        // Block external actions if there was no active user input on the page
         if (isExternal && !isUserInteracting) return true;
         return false;
 
       case 'high':
-        // Block all non-user-triggered external navigations, and inspect user clicks
         if (isExternal) {
           if (!isUserInteracting) return true;
         }
         return false;
 
       case 'extreme':
-        // Aggressively prevent ANY external navigation redirects or automatic redirects
         if (isExternal) return true;
         return !isUserInteracting;
 
@@ -130,7 +137,7 @@
       const targetUrl = url ? String(url) : 'about:blank';
       if (shouldBlockRedirect(targetUrl)) {
         logBlocked('popup', targetUrl);
-        return null; // Return null to signal blocking according to specifications
+        return null;
       }
       return originalOpen.apply(this, arguments);
     };
@@ -147,7 +154,7 @@
       const targetUrl = url ? String(url) : '';
       if (shouldBlockRedirect(targetUrl)) {
         logBlocked('redirect', targetUrl);
-        return; // Terminate execution
+        return;
       }
       return originalAssign.call(this, url);
     };
@@ -157,12 +164,11 @@
       const targetUrl = url ? String(url) : '';
       if (shouldBlockRedirect(targetUrl)) {
         logBlocked('redirect', targetUrl);
-        return; // Terminate execution
+        return;
       }
       return originalReplace.call(this, url);
     };
 
-    // Attempt to hook location.href setter
     const hrefDescriptor = Object.getOwnPropertyDescriptor(Location.prototype, 'href');
     if (hrefDescriptor && hrefDescriptor.set) {
       const originalSetHref = hrefDescriptor.set;
@@ -217,16 +223,14 @@
   document.addEventListener('click', function(event) {
     let target = event.target;
 
-    // Find closest anchor tag or clickable button/elements
     while (target && target !== document) {
       const tagName = target.tagName ? target.tagName.toUpperCase() : '';
       
-      // Feature 4: Handle target="_blank"
       if (tagName === 'A' && target.target === '_blank') {
         const href = target.href || target.getAttribute('href');
         if (isExternalUrl(href)) {
           if (config.protectionLevel !== 'low') {
-            target.target = '_self'; // Convert to self
+            target.target = '_self';
             if (config.consoleLogging) {
               console.log(`[RedirectShield] Converted target="_blank" to "_self" for external URL: ${href}`);
             }
@@ -234,7 +238,6 @@
         }
       }
 
-      // Feature 3 & 5: Check if the element clicked is an suspicious/hijacking click trigger
       if (tagName === 'A' || tagName === 'AREA' || target.hasAttribute('onclick')) {
         const href = target.href || target.getAttribute('href');
         
@@ -248,6 +251,6 @@
       
       target = target.parentNode;
     }
-  }, true); // Use capturing phase to get before other listeners
+  }, true);
 
 })();

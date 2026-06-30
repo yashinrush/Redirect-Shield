@@ -1,7 +1,7 @@
 /**
  * Redirect Shield - Dashboard Options page
  * Manages tab navigations, protection levels selection, whitelist/blacklist managers,
- * custom analytical bar rendering, preference toggles, settings backups.
+ * custom analytical bar rendering, preference toggles, settings backups, and per-site override listings.
  */
 
 document.addEventListener('DOMContentLoaded', () => {
@@ -25,6 +25,10 @@ document.addEventListener('DOMContentLoaded', () => {
   const blacklistSearch = document.getElementById('blacklist-search');
   const blacklistList = document.getElementById('blacklist-list');
 
+  // Overrides list elements
+  const overridesSearch = document.getElementById('overrides-search');
+  const overridesList = document.getElementById('overrides-list');
+
   // Analytics elements
   const statsTotalAll = document.getElementById('stats-total-all');
   const statsTodayAll = document.getElementById('stats-today-all');
@@ -47,6 +51,8 @@ document.addEventListener('DOMContentLoaded', () => {
   const prefShowToasts = document.getElementById('pref-show-toasts');
   const prefConsoleLogging = document.getElementById('pref-console-logging');
   const prefRemoveOverlays = document.getElementById('pref-remove-overlays');
+  const prefDebugMode = document.getElementById('pref-debug-mode');
+  const prefAutoRules = document.getElementById('pref-auto-rules');
   
   const exportBtn = document.getElementById('export-settings-btn');
   const importTrigger = document.getElementById('import-settings-trigger');
@@ -57,6 +63,7 @@ document.addEventListener('DOMContentLoaded', () => {
   let appState = {
     whitelist: [],
     blacklist: [],
+    siteOverrides: {},
     stats: {}
   };
 
@@ -65,11 +72,9 @@ document.addEventListener('DOMContentLoaded', () => {
     btn.addEventListener('click', () => {
       const targetId = btn.getAttribute('data-target');
       
-      // Update buttons
       navItems.forEach(n => n.classList.remove('active'));
       btn.classList.add('active');
 
-      // Update panels
       tabPanels.forEach(panel => {
         if (panel.id === targetId) {
           panel.classList.add('active');
@@ -113,9 +118,10 @@ document.addEventListener('DOMContentLoaded', () => {
       };
       summaryActiveLevel.textContent = levelNames[activeLevel] || activeLevel;
 
-      // Populate Whitelist & Blacklist
+      // Populate lists
       renderDomainList('whitelist');
       renderDomainList('blacklist');
+      renderOverridesList();
 
       // Populate Analytics & Insight numbers
       const stats = result.stats || {};
@@ -141,7 +147,7 @@ document.addEventListener('DOMContentLoaded', () => {
         totalStats.redirects || 0,
         totalStats.overlays || 0,
         totalStats.windows || 0,
-        1 // prevent division by zero
+        1
       );
 
       progressPopups.style.width = `${((totalStats.popups || 0) / maxVal) * 100}%`;
@@ -156,6 +162,8 @@ document.addEventListener('DOMContentLoaded', () => {
       prefShowToasts.checked = result.showToasts !== false;
       prefConsoleLogging.checked = result.consoleLogging !== false;
       prefRemoveOverlays.checked = result.autoRemoveOverlays !== false;
+      prefDebugMode.checked = !!result.debugMode;
+      prefAutoRules.checked = !!result.autoRulesUpdate;
     });
   }
 
@@ -165,18 +173,13 @@ document.addEventListener('DOMContentLoaded', () => {
       const selectedLevel = card.getAttribute('data-level');
       
       chrome.storage.local.set({ protectionLevel: selectedLevel }, () => {
-        // Broadcast configuration modification to all loaded tabs
-        chrome.tabs.query({}, (tabs) => {
-          tabs.forEach(tab => {
-            chrome.tabs.sendMessage(tab.id, { type: 'REDIRECT_SHIELD_STATE_CHANGED' }).catch(() => {});
-          });
-        });
+        notifyTabsOfChange();
         loadSettings();
       });
     });
   });
 
-  // 4. Whitelist / Blacklist modification events
+  // 4. Whitelist / Blacklist inputs handlers
   addWhitelistBtn.addEventListener('click', () => addDomain('whitelist'));
   whitelistInput.addEventListener('keypress', (e) => { if (e.key === 'Enter') addDomain('whitelist'); });
   whitelistSearch.addEventListener('input', () => renderDomainList('whitelist'));
@@ -185,20 +188,19 @@ document.addEventListener('DOMContentLoaded', () => {
   blacklistInput.addEventListener('keypress', (e) => { if (e.key === 'Enter') addDomain('blacklist'); });
   blacklistSearch.addEventListener('input', () => renderDomainList('blacklist'));
 
-  // Clean domain input formatting and add to storage array
+  overridesSearch.addEventListener('input', renderOverridesList);
+
   function addDomain(type) {
     const inputEl = type === 'whitelist' ? whitelistInput : blacklistInput;
     let domainStr = inputEl.value.trim().toLowerCase();
 
     if (!domainStr) return;
 
-    // Standardize URLs to clean domain names (strip protocol and paths)
     try {
       if (domainStr.includes('://')) {
         const urlObj = new URL(domainStr);
         domainStr = urlObj.hostname;
       } else {
-        // Parse raw string using virtual URL to ensure subdomain components remain valid
         const urlObj = new URL('http://' + domainStr);
         domainStr = urlObj.hostname;
       }
@@ -220,7 +222,6 @@ document.addEventListener('DOMContentLoaded', () => {
 
     currentList.push(domainStr);
     
-    // Clear conflicting domain entries on the other array list
     const oppositeType = type === 'whitelist' ? 'blacklist' : 'whitelist';
     const oppositeList = appState[oppositeType] || [];
     const confIdx = oppositeList.indexOf(domainStr);
@@ -228,18 +229,23 @@ document.addEventListener('DOMContentLoaded', () => {
       oppositeList.splice(confIdx, 1);
     }
 
+    // Clean up per-site level overrides on whitelist addition to keep state consistent
+    const overrides = appState.siteOverrides || {};
+    if (type === 'whitelist' && overrides[domainStr]) {
+      delete overrides[domainStr];
+    }
+
     chrome.storage.local.set({ 
       [type]: currentList,
-      [oppositeType]: oppositeList
+      [oppositeType]: oppositeList,
+      siteOverrides: overrides
     }, () => {
       inputEl.value = '';
       loadSettings();
-      // Notify active tabs of changes
       notifyTabsOfChange();
     });
   }
 
-  // Notify tabs of list configurations updates
   function notifyTabsOfChange() {
     chrome.tabs.query({}, (tabs) => {
       tabs.forEach(tab => {
@@ -248,7 +254,6 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   }
 
-  // Delete domain helper
   function deleteDomain(type, domain) {
     const list = appState[type] || [];
     const idx = list.indexOf(domain);
@@ -261,7 +266,6 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   }
 
-  // Renders whitelist/blacklist lists inside containers
   function renderDomainList(type) {
     const listEl = type === 'whitelist' ? whitelistList : blacklistList;
     const searchEl = type === 'whitelist' ? whitelistSearch : blacklistSearch;
@@ -277,7 +281,6 @@ document.addEventListener('DOMContentLoaded', () => {
       return;
     }
 
-    // Sort alphabetically
     filtered.sort().forEach(domain => {
       const li = document.createElement('li');
       li.className = 'domain-item';
@@ -304,23 +307,65 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   }
 
-  // Dynamic visual layout for top blocked domains progress chart
+  // Renders the list of custom per-site overrides configuration entries (Feature 3)
+  function renderOverridesList() {
+    overridesList.innerHTML = '';
+    const overrides = appState.siteOverrides || {};
+    const searchQuery = overridesSearch.value.trim().toLowerCase();
+
+    const entries = Object.entries(overrides);
+    const filtered = entries.filter(([domain]) => domain.includes(searchQuery));
+
+    if (filtered.length === 0) {
+      overridesList.innerHTML = `<li class="domain-item"><span style="color: var(--text-muted); font-style: italic;">No custom per-site rules set.</span></li>`;
+      return;
+    }
+
+    filtered.sort((a, b) => a[0].localeCompare(b[0])).forEach(([domain, level]) => {
+      const li = document.createElement('li');
+      li.className = 'domain-item';
+      
+      const span = document.createElement('span');
+      span.innerHTML = `${domain} <span style="color: var(--warning-color); font-size: 11px; margin-left: 8px; font-weight: 700; text-transform: uppercase;">${level}</span>`;
+      span.title = `${domain} (${level})`;
+
+      const delBtn = document.createElement('button');
+      delBtn.className = 'delete-btn';
+      delBtn.title = 'Remove site rule override';
+      delBtn.innerHTML = `
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <polyline points="3 6 5 6 21 6"/>
+          <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>
+        </svg>
+      `;
+
+      delBtn.addEventListener('click', () => {
+        delete overrides[domain];
+        chrome.storage.local.set({ siteOverrides: overrides }, () => {
+          loadSettings();
+          notifyTabsOfChange();
+        });
+      });
+
+      li.appendChild(span);
+      li.appendChild(delBtn);
+      overridesList.appendChild(li);
+    });
+  }
+
   function renderTopDomains(topDomains) {
     topDomainsContainer.innerHTML = '';
-    
     const entries = Object.entries(topDomains);
     if (entries.length === 0) {
       topDomainsContainer.innerHTML = `<p class="no-data">No data recorded yet. Safe browsing!</p>`;
       return;
     }
 
-    // Calculate maximum value to determine lengths proportionally
     const maxBlocks = Math.max(...entries.map(e => e[1]), 1);
 
     entries.forEach(([domain, count]) => {
       const row = document.createElement('div');
       row.className = 'chart-bar-row';
-      
       const percent = (count / maxBlocks) * 100;
 
       row.innerHTML = `
@@ -336,7 +381,7 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   }
 
-  // 5. Hook Preference updates triggers
+  // 5. Preferences binds
   prefShowToasts.addEventListener('change', () => {
     chrome.storage.local.set({ showToasts: prefShowToasts.checked });
   });
@@ -349,18 +394,28 @@ document.addEventListener('DOMContentLoaded', () => {
     chrome.storage.local.set({ autoRemoveOverlays: prefRemoveOverlays.checked });
   });
 
-  // 6. Settings Import and Exports
+  prefDebugMode.addEventListener('change', () => {
+    chrome.storage.local.set({ debugMode: prefDebugMode.checked });
+  });
+
+  prefAutoRules.addEventListener('change', () => {
+    chrome.storage.local.set({ autoRulesUpdate: prefAutoRules.checked });
+  });
+
+  // 6. Settings Import / Export
   exportBtn.addEventListener('click', () => {
     chrome.storage.local.get(null, (data) => {
-      // Exclude session variables and keep only critical parameters
       const backupData = {
         enabled: data.enabled !== false,
         protectionLevel: data.protectionLevel || 'high',
         whitelist: data.whitelist || [],
         blacklist: data.blacklist || [],
+        siteOverrides: data.siteOverrides || {},
         showToasts: data.showToasts !== false,
         consoleLogging: data.consoleLogging !== false,
+        debugMode: !!data.debugMode,
         autoRemoveOverlays: data.autoRemoveOverlays !== false,
+        autoRulesUpdate: !!data.autoRulesUpdate,
         stats: data.stats || {}
       };
 
@@ -390,7 +445,6 @@ document.addEventListener('DOMContentLoaded', () => {
       try {
         const parsed = JSON.parse(event.target.result);
         
-        // Basic configuration structural verification
         if (
           parsed.whitelist !== undefined &&
           parsed.blacklist !== undefined &&
@@ -411,23 +465,19 @@ document.addEventListener('DOMContentLoaded', () => {
     reader.readAsText(file);
   });
 
-  // Factory reset extension stats & values
   factoryResetBtn.addEventListener('click', () => {
     if (confirm('CAUTION: You are about to perform a Factory Reset. This restores all domains whitelist, blacklist, and block records history. Proceed?')) {
       chrome.storage.local.clear(() => {
-        // Triggers default initializer in background.js on restart
         chrome.runtime.reload();
       });
     }
   });
 
-  // Set message updates receiver from service workers
   chrome.runtime.onMessage.addListener((message) => {
     if (message.type === 'REDIRECT_SHIELD_STATS_UPDATED') {
       loadSettings();
     }
   });
 
-  // Initial config load
   loadSettings();
 });

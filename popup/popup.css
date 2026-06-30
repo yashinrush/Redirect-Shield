@@ -206,16 +206,16 @@ body {
   padding: 12px;
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: 10px;
 }
 
 .tab-info {
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: 8px;
 }
 
-.tab-domain-row, .tab-status-row {
+.tab-domain-row, .tab-status-row, .tab-rule-row, .tab-pause-row {
   display: flex;
   justify-content: space-between;
   align-items: center;
@@ -232,14 +232,14 @@ body {
 
 .label {
   color: var(--text-secondary);
-  font-size: 12px;
+  font-size: 11px;
 }
 
 .status-indicator {
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  font-size: 12px;
+  font-size: 11px;
   font-weight: 600;
   padding: 2px 8px;
   border-radius: 6px;
@@ -267,10 +267,64 @@ body {
   background-color: currentColor;
 }
 
+/* Rule overrides and tab pausing styling */
+.popup-select {
+  background: rgba(15, 23, 42, 0.6);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  color: var(--text-primary);
+  border-radius: 6px;
+  font-size: 11px;
+  padding: 3px 6px;
+  outline: none;
+  cursor: pointer;
+  max-width: 140px;
+}
+.popup-select:focus {
+  border-color: var(--accent-color);
+}
+
+.switch-small {
+  position: relative;
+  display: inline-block;
+  width: 36px;
+  height: 18px;
+}
+.switch-small input {
+  opacity: 0;
+  width: 0;
+  height: 0;
+}
+.slider-small {
+  position: absolute;
+  cursor: pointer;
+  top: 0; left: 0; right: 0; bottom: 0;
+  background-color: #334155;
+  transition: .3s;
+  border-radius: 18px;
+}
+.slider-small:before {
+  position: absolute;
+  content: "";
+  height: 12px;
+  width: 12px;
+  left: 3px;
+  bottom: 3px;
+  background-color: white;
+  transition: .3s;
+  border-radius: 50%;
+}
+input:checked + .slider-small {
+  background-color: var(--warning-color);
+}
+input:checked + .slider-small:before {
+  transform: translateX(18px);
+}
+
 .tab-actions {
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 8px;
+  margin-top: 4px;
 }
 
 .action-btn {
