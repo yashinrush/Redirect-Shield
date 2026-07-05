@@ -191,9 +191,12 @@
   </div>
 
   <!-- Hijack Overlay container element -->
-  <div id="fake-hijack-overlay" onclick="triggerHijackRedirect()"></div>
+  <div id="fake-hijack-overlay"></div>
 
   <script>
+    // Register click event dynamically to match real-world ad overlays (without static HTML onclick attributes)
+    document.getElementById('fake-hijack-overlay').addEventListener('click', triggerHijackRedirect);
+
     function triggerWindowOpen() {
       console.log('Sandbox triggering window.open()');
       const win = window.open('https://example.com', '_blank');

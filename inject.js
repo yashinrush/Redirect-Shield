@@ -1,56 +1,170 @@
 /**
- * Redirect Shield - Page context injection script
- * Runs in the main page world to override JavaScript redirect methods and hook event handling.
+ * Redirect Shield AI - Main Page Intercepts
+ * Injected directly into the website's MAIN world to override JS API redirection hooks.
+ * Stops click hijacking attempts and programmatic navigations before they open external tabs.
  */
-
 (function() {
-  // Initial default config (highly secure default, updated dynamically by content.js)
   let config = {
     enabled: true,
-    protectionLevel: 'high',
+    protectionLevel: 'balanced',
     isWhitelisted: false,
     isBlacklisted: false,
-    consoleLogging: true,
-    debugMode: false
+    consoleLogging: true
   };
 
-  // 1. Keep track of user interaction clicks and their targets
-  let lastClickTarget = null;
+  // Interaction tracking variables
   let lastClickTime = 0;
+  let lastClickTarget = null;
   let lastClickTrusted = false;
   let isUserInteracting = false;
   let interactionTimeout = null;
 
-  function registerInteraction(e) {
+  /**
+   * Registers physical user interaction signals to distinguish them from programmatic ad-hooks
+   * @param {Event} e - DOM event
+   */
+  function registerUserInteraction(e) {
     isUserInteracting = true;
     lastClickTime = Date.now();
     lastClickTrusted = e.isTrusted !== false;
     lastClickTarget = e.target;
 
+    // Reset interaction window after 800ms
     if (interactionTimeout) clearTimeout(interactionTimeout);
     interactionTimeout = setTimeout(() => {
       isUserInteracting = false;
     }, 800);
   }
 
-  window.addEventListener('click', registerInteraction, { capture: true, passive: true });
-  window.addEventListener('keydown', registerInteraction, { capture: true, passive: true });
-  window.addEventListener('touchstart', registerInteraction, { capture: true, passive: true });
-  window.addEventListener('mousedown', registerInteraction, { capture: true, passive: true });
+  // Intercept capture phase inputs to verify origin credentials
+  window.addEventListener('click', registerUserInteraction, { capture: true, passive: true });
+  window.addEventListener('keydown', registerUserInteraction, { capture: true, passive: true });
+  window.addEventListener('touchstart', registerUserInteraction, { capture: true, passive: true });
+  window.addEventListener('mousedown', registerUserInteraction, { capture: true, passive: true });
 
-  // 2. Helper to log blocked redirect events and dispatch postMessage to content script
-  function logBlocked(blockType, url) {
+  /**
+   * Helper to parse host domain from URL string
+   */
+  function getUrlDomain(urlStr) {
+    try {
+      const url = new URL(urlStr, window.location.href);
+      return url.hostname;
+    } catch (e) {
+      return '';
+    }
+  }
+
+  /**
+   * Checks if target is external
+   */
+  function isExternalUrl(targetUrlStr, sourceHost) {
+    if (!targetUrlStr) return false;
+    const trimUrl = targetUrlStr.trim();
+    if (
+      trimUrl.startsWith('/') ||
+      trimUrl.startsWith('.') ||
+      trimUrl.startsWith('#') ||
+      trimUrl.toLowerCase().startsWith('javascript:') ||
+      trimUrl.toLowerCase().startsWith('mailto:') ||
+      trimUrl.toLowerCase().startsWith('tel:')
+    ) {
+      return false;
+    }
+    try {
+      const targetUrl = new URL(trimUrl, window.location.href);
+      const targetHost = targetUrl.hostname.toLowerCase();
+      const sourceHostLower = sourceHost.toLowerCase();
+      if (targetHost === sourceHostLower) return false;
+
+      // Subdomains check
+      const getRoot = (host) => {
+        const parts = host.split('.');
+        return parts.length > 2 ? parts.slice(-2).join('.') : host;
+      };
+      return getRoot(targetHost) !== getRoot(sourceHostLower);
+    } catch (e) {
+      return false;
+    }
+  }
+
+  /**
+   * Check if click targets mimic button class structures
+   */
+  function isButtonLikeElement(el) {
+    if (!el || !el.getAttribute) return false;
+    const role = el.getAttribute('role');
+    if (role === 'button' || role === 'link') return true;
+    const className = el.getAttribute('class');
+    if (className && (className.includes('btn') || className.includes('button') || className.includes('play'))) return true;
+    return false;
+  }
+
+  /**
+   * Internal heuristics to classify if a navigation is an unauthorized redirect
+   */
+  function shouldBlockNavigation(targetUrl, contextType) {
+    if (!config.enabled || config.isWhitelisted) return false;
+    if (config.isBlacklisted) return true;
+
+    const currentHost = window.location.hostname;
+    const isExternal = isExternalUrl(targetUrl, currentHost);
+    if (!isExternal) return false;
+
+    // Check click validation timers
+    const isClickRecent = (Date.now() - lastClickTime) < 1000;
+    const isUserAction = isUserInteracting && isClickRecent && lastClickTrusted;
+
+    // Verify trigger node path
+    let isLegitimateTrigger = false;
+    if (isUserAction && lastClickTarget) {
+      let node = lastClickTarget;
+      while (node && node !== document) {
+        const tag = node.tagName ? node.tagName.toUpperCase() : '';
+        if (tag === 'A' || tag === 'BUTTON' || node.hasAttribute('onclick') || isButtonLikeElement(node)) {
+          isLegitimateTrigger = true;
+          break;
+        }
+        node = node.parentNode || node.host;
+      }
+    }
+
+    // SSO login domains
+    const ssoDomains = ['accounts.google.com', 'github.com', 'facebook.com', 'twitter.com', 'x.com', 'discord.com'];
+    const targetHost = getUrlDomain(targetUrl);
+    const isSSO = ssoDomains.some(d => targetHost === d || targetHost.endsWith('.' + d));
+
+    switch (config.protectionLevel) {
+      case 'basic':
+        if (contextType === 'popup') return !isUserAction;
+        return false;
+
+      case 'balanced':
+        return !isUserAction;
+
+      case 'advanced':
+        if (!isUserAction) return true;
+        if (isSSO) return false;
+        // Block programmatic redirects inside legitimate click scopes
+        if (contextType === 'redirect') return true;
+        return !isLegitimateTrigger;
+
+      case 'maximum':
+        if (isSSO && isUserAction && isLegitimateTrigger) return false;
+        return true;
+
+      default:
+        return false;
+    }
+  }
+
+  /**
+   * Helper to dispatch statistics logging block actions back to content script
+   */
+  function dispatchBlockEvent(blockType, url) {
     const cleanUrl = url ? String(url).substring(0, 150) : 'unknown';
-    
-    if (config.debugMode) {
-      const stack = new Error().stack;
-      console.groupCollapsed(`%c[RedirectShield Debug] Blocked ${blockType}: ${cleanUrl}`, 'color: #ef4444; font-weight: bold;');
-      console.warn(`Blocked Redirection Target: ${url}`);
-      console.info(`Active Level: ${config.protectionLevel}`);
-      console.log(`Script call stack trace:\n`, stack);
-      console.groupEnd();
-    } else if (config.consoleLogging) {
-      console.warn(`%c[RedirectShield] Blocked ${blockType}: ${cleanUrl}`, 'color: #ef4444; font-weight: bold;');
+
+    if (config.consoleLogging) {
+      console.warn(`%c[RedirectShieldAI] Intercepted [${blockType}] attempt leads to: ${cleanUrl}`, 'color: #ef4444; font-weight: bold;');
     }
 
     window.postMessage({
@@ -63,116 +177,7 @@
     }, '*');
   }
 
-  // 3. Helper to determine if target URL leads to an external domain
-  function isExternalUrl(urlStr) {
-    try {
-      if (!urlStr) return false;
-      const urlStrTrim = String(urlStr).trim();
-      if (
-        urlStrTrim.startsWith('/') ||
-        urlStrTrim.startsWith('.') ||
-        urlStrTrim.startsWith('#') ||
-        urlStrTrim.toLowerCase().startsWith('javascript:') ||
-        urlStrTrim.toLowerCase().startsWith('mailto:') ||
-        urlStrTrim.toLowerCase().startsWith('tel:')
-      ) {
-        return false;
-      }
-      const url = new URL(urlStrTrim, window.location.href);
-      const currentHost = window.location.hostname;
-      const targetHost = url.hostname;
-
-      if (currentHost === targetHost) return false;
-
-      // Subdomains match check
-      if (targetHost.endsWith('.' + currentHost) || currentHost.endsWith('.' + targetHost)) {
-        return false;
-      }
-
-      return true;
-    } catch (e) {
-      return false;
-    }
-  }
-
-  function getDomainName(urlStr) {
-    try {
-      const url = new URL(urlStr, window.location.href);
-      return url.hostname;
-    } catch (e) {
-      return '';
-    }
-  }
-
-  // Check custom styling indicative of button classes
-  function styleIsButton(el) {
-    if (!el || !el.getAttribute) return false;
-    const role = el.getAttribute('role');
-    if (role === 'button' || role === 'link') return true;
-    const klass = el.getAttribute('class');
-    if (klass && (klass.includes('btn') || klass.includes('button') || klass.includes('play'))) return true;
-    return false;
-  }
-
-  // 4. Advanced Redirect Classifier Heuristics
-  function shouldBlockRedirect(urlStr, actionType) {
-    if (!config.enabled || config.isWhitelisted) return false;
-    if (config.isBlacklisted) return true;
-
-    const isExternal = isExternalUrl(urlStr);
-    if (!isExternal) return false; // Always allow local redirections
-
-    const isClickRecent = (Date.now() - lastClickTime) < 1000;
-    const isUserAction = isUserInteracting && isClickRecent && lastClickTrusted;
-
-    // Inspect if user clicked a legitimate trigger element (supports Shadow DOM traversal)
-    let isLegitTrigger = false;
-    if (isUserAction && lastClickTarget) {
-      let node = lastClickTarget;
-      while (node && node !== document) {
-        const tag = node.tagName ? node.tagName.toUpperCase() : '';
-        if (tag === 'A' || tag === 'BUTTON' || node.hasAttribute('onclick') || styleIsButton(node)) {
-          isLegitTrigger = true;
-          break;
-        }
-        // Support traversing Shadow DOM boundaries
-        node = node.parentNode || node.host;
-      }
-    }
-
-    // Known sharing/identity domains
-    const oauthProviders = [
-      'accounts.google.com', 'github.com', 'facebook.com', 'twitter.com',
-      'linkedin.com', 'appleid.apple.com', 'okta.com', 'auth0.com'
-    ];
-    const targetDomain = getDomainName(urlStr);
-    const isOAuth = oauthProviders.some(d => targetDomain === d || targetDomain.endsWith('.' + d));
-
-    switch (config.protectionLevel) {
-      case 'low':
-        if (actionType === 'popup') {
-          return !isUserAction;
-        }
-        return false;
-
-      case 'medium':
-        return !isUserAction;
-
-      case 'high':
-        if (!isUserAction) return true;
-        if (isOAuth) return false; // Always permit logins
-        return !isLegitTrigger;
-
-      case 'extreme':
-        if (isOAuth && isUserAction && isLegitTrigger) return false;
-        return true;
-
-      default:
-        return false;
-    }
-  }
-
-  // 5. Override APIs and save original references
+  // Backup original references to avoid prototype pollution checks
   const originalOpen = window.open;
   const originalAssign = Location.prototype.assign;
   const originalReplace = Location.prototype.replace;
@@ -188,119 +193,101 @@
     originalSetHref = hrefDescriptor.set;
   }
 
-  // Event listener function for Navigation API
-  function onNavigate(event) {
-    const targetUrl = event.destination.url;
-    if (shouldBlockRedirect(targetUrl, 'redirect')) {
-      event.preventDefault();
-      logBlocked('navigation', targetUrl);
-    }
-  }
-
   function applyOverrides() {
-    try {
-      // Intercept window.open
-      window.open = function(url, name, specs) {
-        const targetUrl = url ? String(url) : 'about:blank';
-        if (shouldBlockRedirect(targetUrl, 'popup')) {
-          logBlocked('popup', targetUrl);
-          return null;
-        }
-        return originalOpen.apply(this, arguments);
-      };
-
-      // Intercept Location assign
-      Location.prototype.assign = function(url) {
-        const targetUrl = url ? String(url) : '';
-        if (shouldBlockRedirect(targetUrl, 'redirect')) {
-          logBlocked('redirect', targetUrl);
-          return;
-        }
-        return originalAssign.call(this, url);
-      };
-
-      // Intercept Location replace
-      Location.prototype.replace = function(url) {
-        const targetUrl = url ? String(url) : '';
-        if (shouldBlockRedirect(targetUrl, 'redirect')) {
-          logBlocked('redirect', targetUrl);
-          return;
-        }
-        return originalReplace.call(this, url);
-      };
-
-      // Intercept Location href changes
-      if (originalSetHref) {
-        Object.defineProperty(Location.prototype, 'href', {
-          set: function(url) {
-            const targetUrl = url ? String(url) : '';
-            if (shouldBlockRedirect(targetUrl, 'redirect')) {
-              logBlocked('redirect', targetUrl);
-              return;
-            }
-            originalSetHref.call(this, url);
-          },
-          get: hrefDescriptor.get,
-          configurable: true,
-          enumerable: true
-        });
+    // Intercept window.open
+    window.open = function(url, name, specs) {
+      const target = url ? String(url) : 'about:blank';
+      if (shouldBlockNavigation(target, 'popup')) {
+        dispatchBlockEvent('popup', target);
+        return null;
       }
+      return originalOpen.apply(this, arguments);
+    };
 
-      // Intercept History pushes
-      History.prototype.pushState = function(state, unused, url) {
-        const targetUrl = url ? String(url) : '';
-        if (targetUrl && shouldBlockRedirect(targetUrl, 'window')) {
-          logBlocked('window', targetUrl);
-          return;
-        }
-        return originalPushState.apply(this, arguments);
-      };
-
-      History.prototype.replaceState = function(state, unused, url) {
-        const targetUrl = url ? String(url) : '';
-        if (targetUrl && shouldBlockRedirect(targetUrl, 'window')) {
-          logBlocked('window', targetUrl);
-          return;
-        }
-        return originalReplaceState.apply(this, arguments);
-      };
-
-      // Intercept disconnected DOM click triggers (Feature 18: Dynamic & Cross-Origin pages)
-      HTMLAnchorElement.prototype.click = function() {
-        const href = this.href || this.getAttribute('href');
-        if (href && shouldBlockRedirect(href, 'redirect')) {
-          logBlocked('anchor click bypass', href);
-          return;
-        }
-        return originalAnchorClick.apply(this, arguments);
-      };
-
-      HTMLAreaElement.prototype.click = function() {
-        const href = this.href || this.getAttribute('href');
-        if (href && shouldBlockRedirect(href, 'redirect')) {
-          logBlocked('area click bypass', href);
-          return;
-        }
-        return originalAreaClick.apply(this, arguments);
-      };
-
-      // Intercept programmatic form submissions
-      HTMLFormElement.prototype.submit = function() {
-        const action = this.action || this.getAttribute('action');
-        if (action && shouldBlockRedirect(action, 'redirect')) {
-          logBlocked('form submit', action);
-          return;
-        }
-        return originalSubmit.apply(this, arguments);
-      };
-
-      // Integrate modern Chrome Navigation API (resolves direct location = "url" bypasses)
-      if (typeof navigation !== 'undefined') {
-        navigation.addEventListener('navigate', onNavigate);
+    // Intercept Location assign
+    Location.prototype.assign = function(url) {
+      const target = url ? String(url) : '';
+      if (shouldBlockNavigation(target, 'redirect')) {
+        dispatchBlockEvent('redirect', target);
+        return;
       }
-    } catch (e) {
-      console.error('[RedirectShield] Overrides installation failed.', e);
+      return originalAssign.call(this, url);
+    };
+
+    // Intercept Location replace
+    Location.prototype.replace = function(url) {
+      const target = url ? String(url) : '';
+      if (shouldBlockNavigation(target, 'redirect')) {
+        dispatchBlockEvent('redirect', target);
+        return;
+      }
+      return originalReplace.call(this, url);
+    };
+
+    // Intercept location.href setter
+    if (originalSetHref) {
+      Object.defineProperty(Location.prototype, 'href', {
+        set: function(url) {
+          const target = url ? String(url) : '';
+          if (shouldBlockNavigation(target, 'redirect')) {
+            dispatchBlockEvent('redirect', target);
+            return;
+          }
+          originalSetHref.call(this, url);
+        },
+        get: hrefDescriptor.get,
+        configurable: true,
+        enumerable: true
+      });
     }
+
+    // Intercept History pushes
+    History.prototype.pushState = function(state, unused, url) {
+      const target = url ? String(url) : '';
+      if (target && shouldBlockNavigation(target, 'window')) {
+        dispatchBlockEvent('window', target);
+        return;
+      }
+      return originalPushState.apply(this, arguments);
+    };
+
+    History.prototype.replaceState = function(state, unused, url) {
+      const target = url ? String(url) : '';
+      if (target && shouldBlockNavigation(target, 'window')) {
+        dispatchBlockEvent('window', target);
+        return;
+      }
+      return originalReplaceState.apply(this, arguments);
+    };
+
+    // Intercept direct DOM anchor clicks
+    HTMLAnchorElement.prototype.click = function() {
+      const href = this.href || this.getAttribute('href');
+      if (href && shouldBlockNavigation(href, 'redirect')) {
+        dispatchBlockEvent('redirect', href);
+        return;
+      }
+      return originalAnchorClick.apply(this, arguments);
+    };
+
+    HTMLAreaElement.prototype.click = function() {
+      const href = this.href || this.getAttribute('href');
+      if (href && shouldBlockNavigation(href, 'redirect')) {
+        dispatchBlockEvent('redirect', href);
+        return;
+      }
+      return originalAreaClick.apply(this, arguments);
+    };
+
+    // Intercept programmatic form submissions
+    HTMLFormElement.prototype.submit = function() {
+      const action = this.action || this.getAttribute('action');
+      if (action && shouldBlockNavigation(action, 'redirect')) {
+        dispatchBlockEvent('redirect', action);
+        return;
+      }
+      return originalSubmit.apply(this, arguments);
+    };
   }
 
   function restoreOriginals() {
@@ -312,7 +299,6 @@
     HTMLAnchorElement.prototype.click = originalAnchorClick;
     HTMLAreaElement.prototype.click = originalAreaClick;
     HTMLFormElement.prototype.submit = originalSubmit;
-    
     if (originalSetHref) {
       Object.defineProperty(Location.prototype, 'href', {
         set: originalSetHref,
@@ -320,56 +306,49 @@
         enumerable: true
       });
     }
-
-    if (typeof navigation !== 'undefined') {
-      navigation.removeEventListener('navigate', onNavigate);
-    }
   }
 
-  // Apply hooks instantly at document_start
+  // Hook elements
   applyOverrides();
 
-  // Listen for config sync updates from content script
+  // Listen to synchronizations updates from Content Script
   window.addEventListener('message', (e) => {
-    if (e.source !== window) return;
-    if (e.data && e.data.type === 'REDIRECT_SHIELD_CONFIG_UPDATE') {
-      config = e.data.config;
-      
-      // If whitelisted or disabled, restore original hooks to remove extensions overhead
-      if (!config.enabled || config.isWhitelisted) {
-        restoreOriginals();
-      }
+    if (e.source !== window || !e.data || e.data.type !== 'REDIRECT_SHIELD_CONFIG_UPDATE') return;
+    config = e.data.config;
+
+    // Restore original browser methods if shield is disabled or page whitelisted
+    if (!config.enabled || config.isWhitelisted) {
+      restoreOriginals();
     }
   });
 
-  // Capture target=_blank conversion logic and link intercepts
+  // Trap capture-phase click events on anchor selectors
   document.addEventListener('click', function(event) {
     if (!config.enabled || config.isWhitelisted) return;
-    
+
     let target = event.target;
     while (target && target !== document) {
-      const tagName = target.tagName ? target.tagName.toUpperCase() : '';
-      if (tagName === 'A' && target.target === '_blank') {
+      const tag = target.tagName ? target.tagName.toUpperCase() : '';
+      
+      // Target blank conversion to current tab target
+      if (tag === 'A' && target.target === '_blank') {
         const href = target.href || target.getAttribute('href');
-        if (isExternalUrl(href) && config.protectionLevel !== 'low') {
+        if (isExternalUrl(href, window.location.hostname) && config.protectionLevel !== 'basic') {
           target.target = '_self';
-          if (config.consoleLogging) {
-            console.log(`[RedirectShield] Converted target="_blank" to "_self" for external URL: ${href}`);
-          }
         }
       }
 
-      if (tagName === 'A' || tagName === 'AREA' || target.hasAttribute('onclick')) {
+      if (tag === 'A' || tag === 'AREA' || target.hasAttribute('onclick')) {
         const href = target.href || target.getAttribute('href');
-        if (href && shouldBlockRedirect(href, 'redirect')) {
+        if (href && shouldBlockNavigation(href, 'redirect')) {
           event.preventDefault();
           event.stopPropagation();
-          logBlocked('redirect', href);
+          event.stopImmediatePropagation();
+          dispatchBlockEvent('redirect', href);
           return;
         }
       }
       target = target.parentNode || target.host;
     }
   }, true);
-
 })();

@@ -1,199 +1,210 @@
 /**
- * Redirect Shield - Popup Logic
- * Coordinates toggle state, active website details, per-site rule overrides,
- * session tab-pausing, and real-time statistics counters.
+ * Redirect Shield AI - Popup Logic Controller
+ * Manages active tab domain ratings, theme adjustments, power switch state,
+ * whitelisting/blacklisting controls, and real-time statistics sync.
  */
-
 document.addEventListener('DOMContentLoaded', () => {
-  // Elements
+  // DOM References
   const powerSection = document.querySelector('.power-section');
   const powerToggleBtn = document.getElementById('power-toggle-btn');
   const statusLabel = document.getElementById('protection-status-label');
   const levelBadge = document.getElementById('protection-level-badge');
-  
+
   const currentDomainEl = document.getElementById('current-domain');
-  const siteStatusEl = document.getElementById('site-status');
+  const siteReputationEl = document.getElementById('site-reputation');
   const whitelistBtn = document.getElementById('whitelist-site-btn');
   const blacklistBtn = document.getElementById('blacklist-site-btn');
-  
-  const siteRuleSelect = document.getElementById('site-rule-select');
-  const sessionPauseCheck = document.getElementById('session-pause-check');
-  
+
   const statTodayEl = document.getElementById('stat-today');
   const statTotalEl = document.getElementById('stat-total');
   const statPopupsEl = document.getElementById('stat-popups');
+  const statRedirectsEl = document.getElementById('stat-redirects');
   const statOverlaysEl = document.getElementById('stat-overlays');
-  
-  const openSettingsBtn = document.getElementById('open-settings-btn');
+  const statDeceptiveEl = document.getElementById('stat-deceptive');
+
+  const themeToggleBtn = document.getElementById('theme-toggle-btn');
+  const sunIcon = themeToggleBtn.querySelector('.sun-icon');
+  const moonIcon = themeToggleBtn.querySelector('.moon-icon');
+
   const resetStatsBtn = document.getElementById('reset-stats-btn');
   const dashboardBtn = document.getElementById('dashboard-btn');
+  const openSettingsBtn = document.getElementById('open-settings-btn');
+
+  const storage = RedirectShieldStorage;
+  const detector = RedirectShieldDetector;
+  const helpers = RedirectShieldHelpers;
 
   let currentDomain = '';
-  let activeTabId = null;
+  let appSettings = {};
 
-  // Initialize page configuration
+  /**
+   * Initializes the popup panel context
+   */
   async function init() {
-    const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
-    const activeTab = tabs[0];
-    
-    if (activeTab && activeTab.url) {
-      activeTabId = activeTab.id;
-      try {
+    // 1. Resolve current active tab domain details
+    try {
+      const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
+      const activeTab = tabs[0];
+      
+      if (activeTab && activeTab.url) {
         const url = new URL(activeTab.url);
         if (url.protocol.startsWith('http')) {
           currentDomain = url.hostname.toLowerCase();
           currentDomainEl.textContent = currentDomain;
-          
-          // Request computed config from background worker (handles paused/whitelisted status)
-          chrome.runtime.sendMessage({
-            type: 'REDIRECT_SHIELD_GET_TAB_CONFIG',
-            url: activeTab.url
-          }, (response) => {
-            if (response) {
-              sessionPauseCheck.checked = response.isTabPaused;
-              
-              // Load customized site override selector
-              chrome.storage.local.get(['siteOverrides'], (res) => {
-                const overrides = res.siteOverrides || {};
-                siteRuleSelect.value = overrides[currentDomain] || 'default';
-              });
-            }
-          });
         } else {
-          setSystemPage();
+          setSystemPageMode();
         }
-      } catch (err) {
-        setUnknownPage();
+      } else {
+        setUnknownPageMode();
       }
-    } else {
-      setUnknownPage();
+    } catch (err) {
+      setUnknownPageMode();
     }
 
-    updateUI();
+    // 2. Fetch and render configurations
+    await loadConfigAndRender();
   }
 
-  function setSystemPage() {
+  function setSystemPageMode() {
     currentDomain = '';
     currentDomainEl.textContent = 'System Page';
     whitelistBtn.disabled = true;
     blacklistBtn.disabled = true;
-    siteRuleSelect.disabled = true;
-    sessionPauseCheck.disabled = true;
   }
 
-  function setUnknownPage() {
+  function setUnknownPageMode() {
     currentDomain = '';
-    currentDomainEl.textContent = 'Unknown Page';
+    currentDomainEl.textContent = 'Internal Webpage';
     whitelistBtn.disabled = true;
     blacklistBtn.disabled = true;
-    siteRuleSelect.disabled = true;
-    sessionPauseCheck.disabled = true;
   }
 
-  // Reload config and update all UI elements
-  function updateUI() {
-    chrome.storage.local.get([
-      'enabled',
-      'protectionLevel',
-      'whitelist',
-      'blacklist',
-      'stats',
-      'siteOverrides'
-    ], (result) => {
-      const isEnabled = result.enabled !== false;
-      const whitelist = result.whitelist || [];
-      const blacklist = result.blacklist || [];
-      const overrides = result.siteOverrides || {};
-      const stats = result.stats || {
-        total: { total: 0, popups: 0, overlays: 0 },
-        daily: { total: 0 }
-      };
+  /**
+   * Loads configurations from storage and updates DOM indicators
+   */
+  async function loadConfigAndRender() {
+    appSettings = await storage.getSettings();
 
-      // Set General Switch State
-      if (isEnabled) {
-        powerSection.classList.add('active');
-        statusLabel.textContent = 'Shield Active';
+    // 1. Apply global theme settings
+    applyTheme(appSettings.theme || 'dark');
+
+    // 2. Toggle active power state
+    const isEnabled = appSettings.enabled !== false;
+    if (isEnabled) {
+      powerSection.classList.add('active');
+      statusLabel.textContent = 'Shield Active';
+    } else {
+      powerSection.classList.remove('active');
+      statusLabel.textContent = 'Shield Disabled';
+    }
+
+    // 3. Render Mode Badge
+    const levelNames = {
+      basic: 'Basic Level',
+      balanced: 'Balanced Mode',
+      advanced: 'Advanced protection',
+      maximum: 'Maximum Shield'
+    };
+    levelBadge.textContent = levelNames[appSettings.protectionLevel] || 'Balanced Mode';
+
+    // 4. Update Site-Specific Reputation and List Actions
+    updateSiteMetadata(isEnabled);
+
+    // 5. Update Block Counters
+    const stats = appSettings.stats || {};
+    const total = stats.total || { popups: 0, redirects: 0, overlays: 0, deceptive: 0, total: 0 };
+    const daily = stats.daily || { total: 0 };
+
+    animateCounter(statTodayEl, daily.total || 0);
+    animateCounter(statTotalEl, total.total || 0);
+    animateCounter(statPopupsEl, total.popups || 0);
+    animateCounter(statRedirectsEl, total.redirects || 0);
+    animateCounter(statOverlaysEl, total.overlays || 0);
+    animateCounter(statDeceptiveEl, total.deceptive || 0);
+  }
+
+  /**
+   * Applies the theme styles (dark/light) to the document
+   */
+  function applyTheme(theme) {
+    if (theme === 'light') {
+      document.documentElement.classList.add('light-theme');
+      sunIcon.style.display = 'block';
+      moonIcon.style.display = 'none';
+    } else {
+      document.documentElement.classList.remove('light-theme');
+      sunIcon.style.display = 'none';
+      moonIcon.style.display = 'block';
+    }
+  }
+
+  /**
+   * Renders local reputation ratings and whitelists/blacklists outline states
+   */
+  function updateSiteMetadata(isEnabled) {
+    if (!currentDomain) {
+      siteReputationEl.className = 'status-indicator';
+      siteReputationEl.innerHTML = '<span class="indicator-dot"></span>N/A';
+      return;
+    }
+
+    // Determine domain list memberships
+    const whitelist = appSettings.whitelist || [];
+    const blacklist = appSettings.blacklist || [];
+    const isWhitelisted = whitelist.includes(currentDomain) || whitelist.some(d => currentDomain.endsWith('.' + d));
+    const isBlacklisted = blacklist.includes(currentDomain) || blacklist.some(d => currentDomain.endsWith('.' + d));
+
+    // Resolve domain safety rating
+    const rating = detector.assessDomainReputation(appSettings, currentDomain);
+
+    if (isWhitelisted) {
+      siteReputationEl.className = 'status-indicator whitelisted';
+      siteReputationEl.innerHTML = '<span class="indicator-dot"></span>Whitelisted';
+      
+      // Update Whitelist button active state
+      whitelistBtn.innerHTML = `
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/>
+        </svg>
+        Whitelisted
+      `;
+      whitelistBtn.classList.remove('outline');
+
+      // Clear Blacklist button states
+      resetBlacklistButton();
+    } else if (isBlacklisted) {
+      siteReputationEl.className = 'status-indicator blacklisted';
+      siteReputationEl.innerHTML = '<span class="indicator-dot"></span>Blacklisted';
+
+      blacklistBtn.innerHTML = `
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <circle cx="12" cy="12" r="10"/>
+          <line x1="4.93" y1="4.93" x2="19.07" y2="19.07"/>
+        </svg>
+        Blacklisted
+      `;
+      blacklistBtn.classList.remove('outline');
+
+      resetWhitelistButton();
+    } else {
+      // Apply reputation grade colors
+      if (rating === 'safe') {
+        siteReputationEl.className = 'status-indicator protected';
+        siteReputationEl.innerHTML = '<span class="indicator-dot"></span>Safe Domain';
+      } else if (rating === 'warning') {
+        siteReputationEl.className = 'status-indicator whitelisted';
+        siteReputationEl.innerHTML = '<span class="indicator-dot"></span>Warning Grade';
       } else {
-        powerSection.classList.remove('active');
-        statusLabel.textContent = 'Shield Inactive';
+        siteReputationEl.className = 'status-indicator blacklisted';
+        siteReputationEl.innerHTML = '<span class="indicator-dot"></span>Suspicious Site';
       }
 
-      // Render Level Badge (handling local overrides)
-      let displayLevel = result.protectionLevel || 'high';
-      if (currentDomain && overrides[currentDomain]) {
-        displayLevel = overrides[currentDomain];
-        levelBadge.textContent = `${displayLevel.charAt(0).toUpperCase() + displayLevel.slice(1)} (Custom)`;
-        levelBadge.style.borderColor = 'var(--warning-color)';
-        levelBadge.style.color = 'var(--warning-color)';
-      } else {
-        levelBadge.textContent = `${displayLevel.charAt(0).toUpperCase() + displayLevel.slice(1)} Protection`;
-        levelBadge.style.borderColor = 'rgba(16, 185, 129, 0.15)';
-        levelBadge.style.color = 'var(--accent-color)';
-      }
-
-      // Check whitelisting and session pausing state to update status
-      if (currentDomain) {
-        const isWhitelisted = whitelist.some(item => currentDomain === item || currentDomain.endsWith('.' + item));
-        const isBlacklisted = blacklist.some(item => currentDomain === item || currentDomain.endsWith('.' + item));
-        
-        if (isWhitelisted) {
-          siteStatusEl.className = 'status-indicator whitelisted';
-          siteStatusEl.innerHTML = '<span class="indicator-dot"></span>Whitelisted';
-          setWhitelistActive();
-        } else if (isBlacklisted) {
-          siteStatusEl.className = 'status-indicator blacklisted';
-          siteStatusEl.innerHTML = '<span class="indicator-dot"></span>Blacklisted';
-          setBlacklistActive();
-        } else if (sessionPauseCheck.checked) {
-          siteStatusEl.className = 'status-indicator whitelisted';
-          siteStatusEl.innerHTML = '<span class="indicator-dot"></span>Tab Paused';
-          resetButtonStates();
-        } else if (!isEnabled) {
-          siteStatusEl.className = 'status-indicator';
-          siteStatusEl.innerHTML = '<span class="indicator-dot"></span>Unprotected';
-          resetButtonStates();
-        } else {
-          siteStatusEl.className = 'status-indicator protected';
-          siteStatusEl.innerHTML = '<span class="indicator-dot"></span>Protected';
-          resetButtonStates();
-        }
-      }
-
-      // Stats counters animation
-      animateCounter(statTodayEl, stats.daily.total || 0);
-      animateCounter(statTotalEl, stats.total.total || 0);
-      animateCounter(statPopupsEl, stats.total.popups || 0);
-      animateCounter(statOverlaysEl, stats.total.overlays || 0);
-    });
+      resetWhitelistButton();
+      resetBlacklistButton();
+    }
   }
 
-  function setWhitelistActive() {
-    whitelistBtn.innerHTML = `
-      <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-        <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/>
-      </svg>
-      Whitelisted
-    `;
-    whitelistBtn.classList.remove('outline');
-    blacklistBtn.classList.add('outline');
-    blacklistBtn.innerHTML = `
-      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-        <circle cx="12" cy="12" r="10"/>
-        <line x1="4.93" y1="4.93" x2="19.07" y2="19.07"/>
-      </svg>
-      Blacklist Site
-    `;
-  }
-
-  function setBlacklistActive() {
-    blacklistBtn.innerHTML = `
-      <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-        <circle cx="12" cy="12" r="10"/>
-        <line x1="4.93" y1="4.93" x2="19.07" y2="19.07"/>
-      </svg>
-      Blacklisted
-    `;
-    blacklistBtn.classList.remove('outline');
+  function resetWhitelistButton() {
     whitelistBtn.classList.add('outline');
     whitelistBtn.innerHTML = `
       <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -204,16 +215,7 @@ document.addEventListener('DOMContentLoaded', () => {
     `;
   }
 
-  function resetButtonStates() {
-    whitelistBtn.classList.add('outline');
-    whitelistBtn.innerHTML = `
-      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-        <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/>
-        <polyline points="22 4 12 14.01 9 11.01"/>
-      </svg>
-      Whitelist Site
-    `;
-
+  function resetBlacklistButton() {
     blacklistBtn.classList.add('outline');
     blacklistBtn.innerHTML = `
       <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -224,130 +226,106 @@ document.addEventListener('DOMContentLoaded', () => {
     `;
   }
 
+  /**
+   * Smoothly transitions counts updating with a visual scale pulse
+   */
   function animateCounter(element, newValue) {
     const oldValue = parseInt(element.textContent || '0', 10);
     if (oldValue === newValue) return;
 
     element.textContent = newValue;
     element.classList.remove('pulse');
-    void element.offsetWidth;
+    void element.offsetWidth; // Reflow reset trigger
     element.classList.add('pulse');
   }
 
-  // Toggle Global State
+  // Toggle power state
   powerToggleBtn.addEventListener('click', () => {
     chrome.runtime.sendMessage({ type: 'REDIRECT_SHIELD_TOGGLE_STATE' }, (response) => {
       if (response) {
-        updateUI();
+        loadConfigAndRender();
       }
     });
   });
 
-  // Whitelist website toggle
-  whitelistBtn.addEventListener('click', () => {
+  // Whitelist button click trigger
+  whitelistBtn.addEventListener('click', async () => {
     if (!currentDomain) return;
-    chrome.storage.local.get(['whitelist', 'blacklist'], (result) => {
-      let whitelist = result.whitelist || [];
-      let blacklist = result.blacklist || [];
 
-      const idx = whitelist.indexOf(currentDomain);
-      if (idx > -1) {
-        whitelist.splice(idx, 1);
-      } else {
-        whitelist.push(currentDomain);
-        const bIdx = blacklist.indexOf(currentDomain);
-        if (bIdx > -1) blacklist.splice(bIdx, 1);
-      }
-
-      chrome.storage.local.set({ whitelist, blacklist }, () => {
-        updateUI();
-        reloadActiveTab();
-      });
-    });
-  });
-
-  // Blacklist website toggle
-  blacklistBtn.addEventListener('click', () => {
-    if (!currentDomain) return;
-    chrome.storage.local.get(['whitelist', 'blacklist'], (result) => {
-      let whitelist = result.whitelist || [];
-      let blacklist = result.blacklist || [];
-
-      const idx = blacklist.indexOf(currentDomain);
-      if (idx > -1) {
-        blacklist.splice(idx, 1);
-      } else {
-        blacklist.push(currentDomain);
-        const wIdx = whitelist.indexOf(currentDomain);
-        if (wIdx > -1) whitelist.splice(wIdx, 1);
-      }
-
-      chrome.storage.local.set({ whitelist, blacklist }, () => {
-        updateUI();
-        reloadActiveTab();
-      });
-    });
-  });
-
-  // Handle per-site custom protection rule select dropdown
-  siteRuleSelect.addEventListener('change', () => {
-    if (!currentDomain) return;
-    const value = siteRuleSelect.value;
+    const whitelist = appSettings.whitelist || [];
+    const blacklist = appSettings.blacklist || [];
     
-    chrome.storage.local.get(['siteOverrides'], (result) => {
-      let overrides = result.siteOverrides || {};
-      
-      if (value === 'default') {
-        delete overrides[currentDomain];
-      } else {
-        overrides[currentDomain] = value;
+    const idx = whitelist.indexOf(currentDomain);
+    if (idx > -1) {
+      whitelist.splice(idx, 1);
+    } else {
+      whitelist.push(currentDomain);
+      // Remove conflicts from opposite list
+      const bIdx = blacklist.indexOf(currentDomain);
+      if (bIdx > -1) blacklist.splice(bIdx, 1);
+    }
+
+    await storage.set({ whitelist, blacklist });
+    await loadConfigAndRender();
+    notifyCurrentTabOfChange();
+  });
+
+  // Blacklist button click trigger
+  blacklistBtn.addEventListener('click', async () => {
+    if (!currentDomain) return;
+
+    const whitelist = appSettings.whitelist || [];
+    const blacklist = appSettings.blacklist || [];
+
+    const idx = blacklist.indexOf(currentDomain);
+    if (idx > -1) {
+      blacklist.splice(idx, 1);
+    } else {
+      blacklist.push(currentDomain);
+      // Remove conflicts from opposite list
+      const wIdx = whitelist.indexOf(currentDomain);
+      if (wIdx > -1) whitelist.splice(wIdx, 1);
+    }
+
+    await storage.set({ whitelist, blacklist });
+    await loadConfigAndRender();
+    notifyCurrentTabOfChange();
+  });
+
+  /**
+   * Reload current active tab to immediately enforce modifications
+   */
+  async function notifyCurrentTabOfChange() {
+    try {
+      const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
+      if (tabs[0] && tabs[0].id) {
+        chrome.tabs.sendMessage(tabs[0].id, { type: 'REDIRECT_SHIELD_STATE_CHANGED' }).catch(() => {});
+        chrome.tabs.reload(tabs[0].id);
       }
-
-      chrome.storage.local.set({ siteOverrides: overrides }, () => {
-        updateUI();
-        reloadActiveTab();
-      });
-    });
-  });
-
-  // Handle session tab pause bypass check
-  sessionPauseCheck.addEventListener('change', () => {
-    if (!activeTabId) return;
-    const pause = sessionPauseCheck.checked;
-    
-    chrome.runtime.sendMessage({
-      type: 'REDIRECT_SHIELD_PAUSE_TAB',
-      detail: { tabId: activeTabId, pause }
-    }, () => {
-      updateUI();
-      reloadActiveTab();
-    });
-  });
-
-  async function reloadActiveTab() {
-    const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
-    if (tabs[0] && tabs[0].id) {
-      chrome.tabs.reload(tabs[0].id);
+    } catch (e) {
+      // Ignore reload exceptions
     }
   }
 
-  // Reset counters
-  resetStatsBtn.addEventListener('click', () => {
-    if (confirm('Are you sure you want to reset all blocked event history and counts?')) {
-      const resetStats = {
-        total: { redirects: 0, popups: 0, overlays: 0, windows: 0, total: 0 },
-        daily: { date: '', redirects: 0, popups: 0, overlays: 0, windows: 0, total: 0 },
-        weekly: { startOfWeek: '', redirects: 0, popups: 0, overlays: 0, windows: 0, total: 0 },
-        monthly: { startOfMonth: '', redirects: 0, popups: 0, overlays: 0, windows: 0, total: 0 },
-        topDomains: {}
-      };
-      chrome.storage.local.set({ stats: resetStats }, () => {
-        updateUI();
-      });
+  // Theme toggler click trigger
+  themeToggleBtn.addEventListener('click', async () => {
+    const isLight = document.documentElement.classList.contains('light-theme');
+    const newTheme = isLight ? 'dark' : 'light';
+    await storage.set({ theme: newTheme });
+    applyTheme(newTheme);
+  });
+
+  // Reset stats triggers
+  resetStatsBtn.addEventListener('click', async () => {
+    const confirmReset = confirm('Are you sure you want to reset all blocked event history and counts?');
+    if (confirmReset) {
+      await storage.resetStats();
+      await loadConfigAndRender();
     }
   });
 
-  function openOptions() {
+  // Navigation dashboard shortcuts
+  function openDashboard() {
     if (chrome.runtime.openOptionsPage) {
       chrome.runtime.openOptionsPage();
     } else {
@@ -355,14 +333,16 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   }
 
-  openSettingsBtn.addEventListener('click', openOptions);
-  dashboardBtn.addEventListener('click', openOptions);
+  dashboardBtn.addEventListener('click', openDashboard);
+  openSettingsBtn.addEventListener('click', openDashboard);
 
+  // Sync metrics dynamic increments on message logs
   chrome.runtime.onMessage.addListener((message) => {
-    if (message.type === 'REDIRECT_SHIELD_STATS_UPDATED') {
-      updateUI();
+    if (message && message.type === 'REDIRECT_SHIELD_STATS_UPDATED') {
+      loadConfigAndRender();
     }
   });
 
+  // Launch initial checks
   init();
 });

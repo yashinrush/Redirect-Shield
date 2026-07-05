@@ -1,20 +1,19 @@
 /**
- * Redirect Shield - Dashboard Options page
- * Manages tab navigations, protection levels selection, whitelist/blacklist managers,
- * custom analytical bar rendering, preference toggles, settings backups, and per-site override listings.
+ * Redirect Shield AI - Options Dashboard logic Controller
+ * Coordinates tab views, level settings, whitelists/blacklists manager,
+ * horizontal progress charts, diagnostic toggles, and data migration utilities.
  */
-
 document.addEventListener('DOMContentLoaded', () => {
   // Navigation elements
   const navItems = document.querySelectorAll('.nav-item');
   const tabPanels = document.querySelectorAll('.tab-panel');
 
-  // Config elements
+  // Protection Level elements
   const levelCards = document.querySelectorAll('.level-card');
   const summaryActiveStatus = document.getElementById('summary-active-status');
   const summaryActiveLevel = document.getElementById('summary-active-level');
 
-  // Whitelist / Blacklist elements
+  // Whitelist / Blacklist inputs
   const whitelistInput = document.getElementById('whitelist-input');
   const addWhitelistBtn = document.getElementById('add-whitelist-btn');
   const whitelistSearch = document.getElementById('whitelist-search');
@@ -25,47 +24,40 @@ document.addEventListener('DOMContentLoaded', () => {
   const blacklistSearch = document.getElementById('blacklist-search');
   const blacklistList = document.getElementById('blacklist-list');
 
-  // Overrides list elements
-  const overridesSearch = document.getElementById('overrides-search');
-  const overridesList = document.getElementById('overrides-list');
-
-  // Analytics elements
+  // Statistics counters
   const statsTotalAll = document.getElementById('stats-total-all');
   const statsTodayAll = document.getElementById('stats-today-all');
   const statsWeeklyAll = document.getElementById('stats-weekly-all');
   const statsMonthlyAll = document.getElementById('stats-monthly-all');
-  
+
   const barValPopups = document.getElementById('bar-val-popups');
   const barValRedirects = document.getElementById('bar-val-redirects');
   const barValOverlays = document.getElementById('bar-val-overlays');
-  const barValWindows = document.getElementById('bar-val-windows');
-  
+  const barValDeceptive = document.getElementById('bar-val-deceptive');
+
   const progressPopups = document.getElementById('progress-bar-popups');
   const progressRedirects = document.getElementById('progress-bar-redirects');
   const progressOverlays = document.getElementById('progress-bar-overlays');
-  const progressWindows = document.getElementById('progress-bar-windows');
-  
+  const progressDeceptive = document.getElementById('progress-bar-deceptive');
+
   const topDomainsContainer = document.getElementById('top-domains-container');
 
-  // Preference elements
+  // Diagnostic switches
   const prefShowToasts = document.getElementById('pref-show-toasts');
   const prefConsoleLogging = document.getElementById('pref-console-logging');
   const prefRemoveOverlays = document.getElementById('pref-remove-overlays');
-  const prefDebugMode = document.getElementById('pref-debug-mode');
-  const prefAutoRules = document.getElementById('pref-auto-rules');
-  
+  const prefDetectDeceptive = document.getElementById('pref-detect-deceptive');
+
+  // Backups / reset buttons
   const exportBtn = document.getElementById('export-settings-btn');
   const importTrigger = document.getElementById('import-settings-trigger');
   const importFile = document.getElementById('import-settings-file');
   const factoryResetBtn = document.getElementById('reset-all-settings-btn');
 
-  // State variables
-  let appState = {
-    whitelist: [],
-    blacklist: [],
-    siteOverrides: {},
-    stats: {}
-  };
+  const themeBtns = document.querySelectorAll('.theme-btn');
+
+  const storage = RedirectShieldStorage;
+  let appState = {};
 
   // 1. Sidebar tab switching
   navItems.forEach(btn => {
@@ -85,101 +77,131 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   });
 
-  // 2. Fetch and render state on load
-  function loadSettings() {
-    chrome.storage.local.get(null, (result) => {
-      appState = result;
-      
-      // Update protection level UI selection
-      const activeLevel = result.protectionLevel || 'high';
-      levelCards.forEach(card => {
-        if (card.getAttribute('data-level') === activeLevel) {
-          card.classList.add('active');
-        } else {
-          card.classList.remove('active');
-        }
-      });
+  // 2. Fetch and render settings on page load
+  async function loadSettings() {
+    appState = await storage.getSettings();
 
-      // Update status summary section
-      const isEnabled = result.enabled !== false;
-      if (isEnabled) {
-        summaryActiveStatus.textContent = 'ON';
-        summaryActiveStatus.className = 'status-green';
+    // Enforce Theme
+    applyTheme(appState.theme || 'dark');
+
+    // Update active level indicator card
+    const activeLevel = appState.protectionLevel || 'balanced';
+    levelCards.forEach(card => {
+      if (card.getAttribute('data-level') === activeLevel) {
+        card.classList.add('active');
       } else {
-        summaryActiveStatus.textContent = 'OFF';
-        summaryActiveStatus.className = '';
+        card.classList.remove('active');
       }
-      
-      const levelNames = {
-        'low': 'Basic Shield (Low)',
-        'medium': 'Moderate Shield (Medium)',
-        'high': 'Advanced Shield (High)',
-        'extreme': 'Strict Shield (Extreme)'
-      };
-      summaryActiveLevel.textContent = levelNames[activeLevel] || activeLevel;
+    });
 
-      // Populate lists
-      renderDomainList('whitelist');
-      renderDomainList('blacklist');
-      renderOverridesList();
+    // Update status summary text
+    const isEnabled = appState.enabled !== false;
+    if (isEnabled) {
+      summaryActiveStatus.textContent = 'ON';
+      summaryActiveStatus.className = 'status-green';
+    } else {
+      summaryActiveStatus.textContent = 'OFF';
+      summaryActiveStatus.className = '';
+    }
 
-      // Populate Analytics & Insight numbers
-      const stats = result.stats || {};
-      const totalStats = stats.total || { total: 0, popups: 0, redirects: 0, overlays: 0, windows: 0 };
-      const dailyStats = stats.daily || { total: 0 };
-      const weeklyStats = stats.weekly || { total: 0 };
-      const monthlyStats = stats.monthly || { total: 0 };
+    const levelNames = {
+      basic: 'Basic Protection Level',
+      balanced: 'Balanced Mode (Recommended)',
+      advanced: 'Advanced Shielding level',
+      maximum: 'Strict Maximum Shield'
+    };
+    summaryActiveLevel.textContent = levelNames[activeLevel] || activeLevel;
 
-      statsTotalAll.textContent = totalStats.total || 0;
-      statsTodayAll.textContent = dailyStats.total || 0;
-      statsWeeklyAll.textContent = weeklyStats.total || 0;
-      statsMonthlyAll.textContent = monthlyStats.total || 0;
+    // Render Whitelist & Blacklist domains
+    renderDomainList('whitelist');
+    renderDomainList('blacklist');
 
-      // Category counts
-      barValPopups.textContent = totalStats.popups || 0;
-      barValRedirects.textContent = totalStats.redirects || 0;
-      barValOverlays.textContent = totalStats.overlays || 0;
-      barValWindows.textContent = totalStats.windows || 0;
+    // Populate Analytics numbers
+    const stats = appState.stats || {};
+    const totalStats = stats.total || { total: 0, popups: 0, redirects: 0, overlays: 0, deceptive: 0 };
+    const dailyStats = stats.daily || { total: 0 };
+    const weeklyStats = stats.weekly || { total: 0 };
+    const monthlyStats = stats.monthly || { total: 0 };
 
-      // Category percentage bar calculations
-      const maxVal = Math.max(
-        totalStats.popups || 0,
-        totalStats.redirects || 0,
-        totalStats.overlays || 0,
-        totalStats.windows || 0,
-        1
-      );
+    statsTotalAll.textContent = totalStats.total || 0;
+    statsTodayAll.textContent = dailyStats.total || 0;
+    statsWeeklyAll.textContent = weeklyStats.total || 0;
+    statsMonthlyAll.textContent = monthlyStats.total || 0;
 
+    barValPopups.textContent = totalStats.popups || 0;
+    barValRedirects.textContent = totalStats.redirects || 0;
+    barValOverlays.textContent = totalStats.overlays || 0;
+    barValDeceptive.textContent = totalStats.deceptive || 0;
+
+    // Category percentage bar animations
+    const maxVal = Math.max(
+      totalStats.popups || 0,
+      totalStats.redirects || 0,
+      totalStats.overlays || 0,
+      totalStats.deceptive || 0,
+      1 // Prevent dividing by zero
+    );
+
+    progressPopups.style.width = '0%';
+    progressRedirects.style.width = '0%';
+    progressOverlays.style.width = '0%';
+    progressDeceptive.style.width = '0%';
+
+    setTimeout(() => {
       progressPopups.style.width = `${((totalStats.popups || 0) / maxVal) * 100}%`;
       progressRedirects.style.width = `${((totalStats.redirects || 0) / maxVal) * 100}%`;
       progressOverlays.style.width = `${((totalStats.overlays || 0) / maxVal) * 100}%`;
-      progressWindows.style.width = `${((totalStats.windows || 0) / maxVal) * 100}%`;
+      progressDeceptive.style.width = `${((totalStats.deceptive || 0) / maxVal) * 100}%`;
+    }, 100);
 
-      // Render top domains bar chart
-      renderTopDomains(stats.topDomains || {});
+    // Render top domains bar chart
+    renderTopDomains(stats.topDomains || {});
 
-      // Toggles switches states
-      prefShowToasts.checked = result.showToasts !== false;
-      prefConsoleLogging.checked = result.consoleLogging !== false;
-      prefRemoveOverlays.checked = result.autoRemoveOverlays !== false;
-      prefDebugMode.checked = !!result.debugMode;
-      prefAutoRules.checked = !!result.autoRulesUpdate;
+    // Sync Toggle Switch values
+    prefShowToasts.checked = appState.showToasts !== false;
+    prefConsoleLogging.checked = appState.consoleLogging !== false;
+    prefRemoveOverlays.checked = appState.autoRemoveOverlays !== false;
+    prefDetectDeceptive.checked = appState.detectFakeDownloads !== false;
+  }
+
+  /**
+   * Applies the theme styles (dark/light) to the options page
+   */
+  function applyTheme(theme) {
+    if (theme === 'light') {
+      document.documentElement.classList.add('light-theme');
+    } else {
+      document.documentElement.classList.remove('light-theme');
+    }
+    themeBtns.forEach(btn => {
+      if (btn.getAttribute('data-theme') === theme) {
+        btn.classList.add('active');
+      } else {
+        btn.classList.remove('active');
+      }
     });
   }
 
-  // 3. Selection of Protection Levels card
-  levelCards.forEach(card => {
-    card.addEventListener('click', () => {
-      const selectedLevel = card.getAttribute('data-level');
-      
-      chrome.storage.local.set({ protectionLevel: selectedLevel }, () => {
-        notifyTabsOfChange();
-        loadSettings();
-      });
+  // Theme switch button triggers
+  themeBtns.forEach(btn => {
+    btn.addEventListener('click', async () => {
+      const theme = btn.getAttribute('data-theme');
+      await storage.set({ theme });
+      applyTheme(theme);
     });
   });
 
-  // 4. Whitelist / Blacklist inputs handlers
+  // 3. Selection of Protection Levels card
+  levelCards.forEach(card => {
+    card.addEventListener('click', async () => {
+      const selectedLevel = card.getAttribute('data-level');
+      await storage.set({ protectionLevel: selectedLevel });
+      notifyTabsOfChange();
+      await loadSettings();
+    });
+  });
+
+  // 4. Domain Whitelist / Blacklist modifiers
   addWhitelistBtn.addEventListener('click', () => addDomain('whitelist'));
   whitelistInput.addEventListener('keypress', (e) => { if (e.key === 'Enter') addDomain('whitelist'); });
   whitelistSearch.addEventListener('input', () => renderDomainList('whitelist'));
@@ -188,28 +210,25 @@ document.addEventListener('DOMContentLoaded', () => {
   blacklistInput.addEventListener('keypress', (e) => { if (e.key === 'Enter') addDomain('blacklist'); });
   blacklistSearch.addEventListener('input', () => renderDomainList('blacklist'));
 
-  overridesSearch.addEventListener('input', renderOverridesList);
-
-  function addDomain(type) {
+  async function addDomain(type) {
     const inputEl = type === 'whitelist' ? whitelistInput : blacklistInput;
     let domainStr = inputEl.value.trim().toLowerCase();
 
     if (!domainStr) return;
 
+    // Normalizes URLs input to hostname domains
     try {
       if (domainStr.includes('://')) {
-        const urlObj = new URL(domainStr);
-        domainStr = urlObj.hostname;
+        domainStr = new URL(domainStr).hostname;
       } else {
-        const urlObj = new URL('http://' + domainStr);
-        domainStr = urlObj.hostname;
+        domainStr = new URL('http://' + domainStr).hostname;
       }
     } catch (e) {
-      alert('Invalid domain format entered. Please enter a valid host name like example.com.');
+      alert('Invalid domain format entered. Please enter a valid host name like site.com.');
       return;
     }
 
-    if (!domainStr || !domainStr.includes('.')) {
+    if (globalScope.RedirectShieldHelpers && !globalScope.RedirectShieldHelpers.isValidDomain(domainStr)) {
       alert('Invalid domain format. Domain must contain a valid TLD extension (e.g. site.com).');
       return;
     }
@@ -221,48 +240,31 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     currentList.push(domainStr);
-    
+
+    // Remove domains from opposite lists to avoid configuration conflicts
     const oppositeType = type === 'whitelist' ? 'blacklist' : 'whitelist';
     const oppositeList = appState[oppositeType] || [];
-    const confIdx = oppositeList.indexOf(domainStr);
-    if (confIdx > -1) {
-      oppositeList.splice(confIdx, 1);
-    }
+    const conflictIdx = oppositeList.indexOf(domainStr);
+    if (conflictIdx > -1) oppositeList.splice(conflictIdx, 1);
 
-    // Clean up per-site level overrides on whitelist addition to keep state consistent
-    const overrides = appState.siteOverrides || {};
-    if (type === 'whitelist' && overrides[domainStr]) {
-      delete overrides[domainStr];
-    }
-
-    chrome.storage.local.set({ 
+    await storage.set({
       [type]: currentList,
-      [oppositeType]: oppositeList,
-      siteOverrides: overrides
-    }, () => {
-      inputEl.value = '';
-      loadSettings();
-      notifyTabsOfChange();
+      [oppositeType]: oppositeList
     });
+
+    inputEl.value = '';
+    notifyTabsOfChange();
+    await loadSettings();
   }
 
-  function notifyTabsOfChange() {
-    chrome.tabs.query({}, (tabs) => {
-      tabs.forEach(tab => {
-        chrome.tabs.sendMessage(tab.id, { type: 'REDIRECT_SHIELD_STATE_CHANGED' }).catch(() => {});
-      });
-    });
-  }
-
-  function deleteDomain(type, domain) {
+  async function deleteDomain(type, domain) {
     const list = appState[type] || [];
     const idx = list.indexOf(domain);
     if (idx > -1) {
       list.splice(idx, 1);
-      chrome.storage.local.set({ [type]: list }, () => {
-        loadSettings();
-        notifyTabsOfChange();
-      });
+      await storage.set({ [type]: list });
+      notifyTabsOfChange();
+      await loadSettings();
     }
   }
 
@@ -275,16 +277,15 @@ document.addEventListener('DOMContentLoaded', () => {
     listEl.innerHTML = '';
 
     const filtered = items.filter(domain => domain.includes(searchQuery));
-
     if (filtered.length === 0) {
-      listEl.innerHTML = `<li class="domain-item"><span style="color: var(--text-muted); font-style: italic;">No domains found.</span></li>`;
+      listEl.innerHTML = `<li class="domain-item"><span style="color: var(--text-muted-dark); font-style: italic;">No domains found.</span></li>`;
       return;
     }
 
     filtered.sort().forEach(domain => {
       const li = document.createElement('li');
       li.className = 'domain-item';
-      
+
       const span = document.createElement('span');
       span.textContent = domain;
       span.title = domain;
@@ -307,57 +308,12 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   }
 
-  // Renders the list of custom per-site overrides configuration entries (Feature 3)
-  function renderOverridesList() {
-    overridesList.innerHTML = '';
-    const overrides = appState.siteOverrides || {};
-    const searchQuery = overridesSearch.value.trim().toLowerCase();
-
-    const entries = Object.entries(overrides);
-    const filtered = entries.filter(([domain]) => domain.includes(searchQuery));
-
-    if (filtered.length === 0) {
-      overridesList.innerHTML = `<li class="domain-item"><span style="color: var(--text-muted); font-style: italic;">No custom per-site rules set.</span></li>`;
-      return;
-    }
-
-    filtered.sort((a, b) => a[0].localeCompare(b[0])).forEach(([domain, level]) => {
-      const li = document.createElement('li');
-      li.className = 'domain-item';
-      
-      const span = document.createElement('span');
-      span.innerHTML = `${domain} <span style="color: var(--warning-color); font-size: 11px; margin-left: 8px; font-weight: 700; text-transform: uppercase;">${level}</span>`;
-      span.title = `${domain} (${level})`;
-
-      const delBtn = document.createElement('button');
-      delBtn.className = 'delete-btn';
-      delBtn.title = 'Remove site rule override';
-      delBtn.innerHTML = `
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-          <polyline points="3 6 5 6 21 6"/>
-          <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>
-        </svg>
-      `;
-
-      delBtn.addEventListener('click', () => {
-        delete overrides[domain];
-        chrome.storage.local.set({ siteOverrides: overrides }, () => {
-          loadSettings();
-          notifyTabsOfChange();
-        });
-      });
-
-      li.appendChild(span);
-      li.appendChild(delBtn);
-      overridesList.appendChild(li);
-    });
-  }
-
   function renderTopDomains(topDomains) {
     topDomainsContainer.innerHTML = '';
     const entries = Object.entries(topDomains);
+
     if (entries.length === 0) {
-      topDomainsContainer.innerHTML = `<p class="no-data">No data recorded yet. Safe browsing!</p>`;
+      topDomainsContainer.innerHTML = `<p class="no-data">Safe browsing! No targets recorded yet.</p>`;
       return;
     }
 
@@ -374,110 +330,111 @@ document.addEventListener('DOMContentLoaded', () => {
           <strong>${count}</strong>
         </div>
         <div class="chart-progress-outer">
-          <div class="chart-progress-inner" style="width: ${percent}%"></div>
+          <div class="chart-progress-inner" style="width: 0%"></div>
         </div>
       `;
       topDomainsContainer.appendChild(row);
+
+      setTimeout(() => {
+        const inner = row.querySelector('.chart-progress-inner');
+        if (inner) inner.style.width = `${percent}%`;
+      }, 50);
     });
   }
 
-  // 5. Preferences binds
-  prefShowToasts.addEventListener('change', () => {
-    chrome.storage.local.set({ showToasts: prefShowToasts.checked });
-  });
-
-  prefConsoleLogging.addEventListener('change', () => {
-    chrome.storage.local.set({ consoleLogging: prefConsoleLogging.checked });
-  });
-
-  prefRemoveOverlays.addEventListener('change', () => {
-    chrome.storage.local.set({ autoRemoveOverlays: prefRemoveOverlays.checked });
-  });
-
-  prefDebugMode.addEventListener('change', () => {
-    chrome.storage.local.set({ debugMode: prefDebugMode.checked });
-  });
-
-  prefAutoRules.addEventListener('change', () => {
-    chrome.storage.local.set({ autoRulesUpdate: prefAutoRules.checked });
-  });
-
-  // 6. Settings Import / Export
-  exportBtn.addEventListener('click', () => {
-    chrome.storage.local.get(null, (data) => {
-      const backupData = {
-        enabled: data.enabled !== false,
-        protectionLevel: data.protectionLevel || 'high',
-        whitelist: data.whitelist || [],
-        blacklist: data.blacklist || [],
-        siteOverrides: data.siteOverrides || {},
-        showToasts: data.showToasts !== false,
-        consoleLogging: data.consoleLogging !== false,
-        debugMode: !!data.debugMode,
-        autoRemoveOverlays: data.autoRemoveOverlays !== false,
-        autoRulesUpdate: !!data.autoRulesUpdate,
-        stats: data.stats || {}
-      };
-
-      const jsonStr = JSON.stringify(backupData, null, 2);
-      const blob = new Blob([jsonStr], { type: 'application/json' });
-      const url = URL.createObjectURL(blob);
-      
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = `redirect_shield_config_${new Date().toISOString().split('T')[0]}.json`;
-      a.click();
-      
-      URL.revokeObjectURL(url);
+  function notifyTabsOfChange() {
+    chrome.tabs.query({}, (tabs) => {
+      tabs.forEach(tab => {
+        chrome.tabs.sendMessage(tab.id, { type: 'REDIRECT_SHIELD_STATE_CHANGED' }).catch(() => {});
+      });
     });
+  }
+
+  // 5. Diagnostic switches click triggers
+  prefShowToasts.addEventListener('change', async () => {
+    await storage.set({ showToasts: prefShowToasts.checked });
   });
 
-  importTrigger.addEventListener('click', () => {
-    importFile.click();
+  prefConsoleLogging.addEventListener('change', async () => {
+    await storage.set({ consoleLogging: prefConsoleLogging.checked });
   });
+
+  prefRemoveOverlays.addEventListener('change', async () => {
+    await storage.set({ autoRemoveOverlays: prefRemoveOverlays.checked });
+  });
+
+  prefDetectDeceptive.addEventListener('change', async () => {
+    await storage.set({ detectFakeDownloads: prefDetectDeceptive.checked });
+  });
+
+  // 6. Config backups Import & Export
+  exportBtn.addEventListener('click', async () => {
+    const data = await storage.get(null);
+    const backup = {
+      enabled: data.enabled !== false,
+      protectionLevel: data.protectionLevel || 'balanced',
+      whitelist: data.whitelist || [],
+      blacklist: data.blacklist || [],
+      showToasts: data.showToasts !== false,
+      consoleLogging: data.consoleLogging !== false,
+      autoRemoveOverlays: data.autoRemoveOverlays !== false,
+      detectFakeDownloads: data.detectFakeDownloads !== false,
+      theme: data.theme || 'dark',
+      stats: data.stats || {}
+    };
+
+    const blob = new Blob([JSON.stringify(backup, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `redirect_shield_ai_backup_${new Date().toISOString().split('T')[0]}.json`;
+    a.click();
+    
+    URL.revokeObjectURL(url);
+  });
+
+  importTrigger.addEventListener('click', () => importFile.click());
 
   importFile.addEventListener('change', (e) => {
     const file = e.target.files[0];
     if (!file) return;
 
     const reader = new FileReader();
-    reader.onload = (event) => {
+    reader.onload = async (event) => {
       try {
         const parsed = JSON.parse(event.target.result);
-        
-        if (
-          parsed.whitelist !== undefined &&
-          parsed.blacklist !== undefined &&
-          parsed.protectionLevel !== undefined
-        ) {
-          chrome.storage.local.set(parsed, () => {
-            alert('Settings and block analytics loaded successfully!');
-            loadSettings();
-            notifyTabsOfChange();
-          });
+        if (parsed.whitelist !== undefined && parsed.blacklist !== undefined && parsed.protectionLevel !== undefined) {
+          await storage.set(parsed);
+          alert('Configuration imported successfully!');
+          notifyTabsOfChange();
+          await loadSettings();
         } else {
           alert('Failed to import: Invalid configuration schema layout.');
         }
       } catch (err) {
-        alert('Failed to read config: File contains invalid JSON structures.');
+        alert('Failed to read configuration: File contains invalid JSON structures.');
       }
     };
     reader.readAsText(file);
   });
 
   factoryResetBtn.addEventListener('click', () => {
-    if (confirm('CAUTION: You are about to perform a Factory Reset. This restores all domains whitelist, blacklist, and block records history. Proceed?')) {
-      chrome.storage.local.clear(() => {
+    const isConfirmed = confirm('WARNING: You are about to Factory Reset the extension. This wipes settings, statistics, and domain lists. Proceed?');
+    if (isConfirmed) {
+      chrome.storage.local.clear(async () => {
         chrome.runtime.reload();
       });
     }
   });
 
+  // Sync stats when background records blocks
   chrome.runtime.onMessage.addListener((message) => {
-    if (message.type === 'REDIRECT_SHIELD_STATS_UPDATED') {
+    if (message && message.type === 'REDIRECT_SHIELD_STATS_UPDATED') {
       loadSettings();
     }
   });
 
+  // Run initial queries
   loadSettings();
 });

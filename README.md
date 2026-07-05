@@ -1,95 +1,136 @@
-# Redirect Shield
+# Redirect Shield AI
 
-**Redirect Shield** is a lightweight, professional-grade browser extension built with modern Manifest V3, pure Vanilla JavaScript, and gorgeous glassmorphic CSS. 
+Redirect Shield AI is a professional-grade, lightweight browser security extension built for modern Manifest V3. It intercepts malicious redirects, programmatic click hijacking, invisible ad overlays, and deceptive fake download links on streaming, media, and manga sites—while preserving normal website functionality.
 
-Its primary objective is to eliminate malicious redirects, click hijacking, invisible ad overlays, fake download triggers, and unwanted popup windows on streaming, media, and manga sites—while preserving normal website behaviors.
+## 📸 Visual Previews
+
+### Settings Dashboard (Protection Levels)
+![Settings Dashboard Levels](screenshots/dashboard_levels.png)
+
+### Settings Dashboard (Analytics & Insights)
+![Settings Dashboard Analytics](screenshots/dashboard_analytics.png)
+
+### Popup Dropdown UI
+![Popup Dropdown UI](screenshots/popup_ui.png)
 
 ---
 
 ## 🚀 Key Features
 
-*   **Main-World JavaScript Interception**: Overrides and blocks programmatic hooks on `window.open`, `Location.prototype.assign`, `Location.prototype.replace`, and `History.prototype.pushState`.
-*   **Capture-Phase Click Hijacking Shield**: Traps document click events before they can fire on ad-listeners, preventing immediate tab-spawns.
-*   **Invisible Overlay Removal**: Identifies and automatically cleans absolute/fixed transparent overlay `div` layers designed to redirect user clicks.
-*   **Flexible Whitelist & Blacklist**: Lets users manage domains to trust (fully bypassed) or restrict (always locked to Extreme protection).
-*   **Custom Protection Levels**:
-    *   **Low (Basic)**: Block basic window popups.
-    *   **Medium (Moderate)**: Block popups and non-user-triggered page redirections.
-    *   **High (Advanced - Recommended)**: Block popups, redirects, overlay elements, and dynamic ads.
-    *   **Extreme (Strict)**: Hard locks all external redirections (useful for streaming/download domains).
-*   **Analytics Engine**: Tracks statistics by day, week, month, and vectors (popups, redirects, overlays) with top-blocked domain tracking.
-*   **Intelligent Toast Notifications**: Injects a custom Shadow-DOM alert inside the page to warn about blocked events without website CSS pollution.
-*   **Keyboard Shortcut Support**: Toggle the shield on/off instantly with a key combination.
+1. **Main-World API Override**: Overrides core browser endpoints (`window.open`, `Location.prototype.assign`, `Location.prototype.replace`, `history.pushState`) inside target page contexts to stop programmatic redirections.
+2. **Overlay Capture Blocker**: Scans page layouts during runtime to identify and automatically delete transparent full-page click overlay divs.
+3. **Deceptive Element Flagging**: Detects fake play/download buttons based on styling and keywords, highlights them, and prompts click confirmations.
+4. **Local Reputation Assessment**: Rates domain safety (Safe, Warning, Suspicious) based on block counts and suffixes without making remote network requests.
+5. **Modern Glassmorphic UI**: Includes a responsive popup and settings dashboard supporting dynamic aurora background circles and dark/light themes.
+6. **Data Backups & Exports**: Back up whitelists, blacklists, and block statistics to a local JSON file, or restore them easily.
 
 ---
-
-## 📸 Screenshots
-
-### Extension Popup
-![Extension Popup](screenshots/popup_screenshot.png)
-
-### Settings Dashboard & Analytics
-![Settings Dashboard](screenshots/dashboard_screenshot.png)
-
----
-
 
 ## 📂 Project Directory Structure
 
 ```
-RedirectShield/
-├── manifest.json         # Extension Manifest V3 declarations
-├── background.js        # Background service worker (state, storage, commands)
-├── content.js           # Document Start page listener (configs, observer, shadow-toasts)
-├── inject.js            # Main-world window API override targets
-├── popup/               # Glassmorphic extension drop-down controls
+RedirectShieldAI/
+├── manifest.json         # Extension Manifest V3 configuration settings
+├── background.js         # Service worker tracking global states & action badge counts
+├── content.js            # Coordinator running DOM overlays and MutationObservers
+├── inject.js             # Main-world execution script overriding window redirection hooks
+├── utils/                # Modular shared utility files
+│   ├── logger.js         # Timestamps logger supporting DEBUG, INFO, WARN, and ERROR
+│   ├── storage.js        # Wrappers managing local storage settings and stats records
+│   ├── helpers.js        # Normalizes domains and provides throttle/debounce controls
+│   ├── rules.js          # Protection level rules evaluator
+│   ├── detector.js       # Heuristics checking fake downloads & domain reputation
+│   ├── overlay.js        # Overlay capture shield detecting and deleting transparent layers
+│   └── toast.js          # Injected Shadow DOM alert toasts
+├── popup/                # Popup Action Dropdown UI
 │   ├── popup.html
 │   ├── popup.css
 │   └── popup.js
-├── options/             # Dashboard and configurations panel
+├── options/               # Full Browser Tab Dashboard Settings
 │   ├── options.html
 │   ├── options.css
 │   └── options.js
-└── icons/               # Security brand assets
-    ├── icon16.png
-    ├── icon48.png
-    └── icon128.png
+├── README.md             # Architecture, permissions, and developer guides
+├── LICENSE               # Open-source licensing agreement (MIT)
+├── CHANGELOG.md          # Release version updates
+└── PRIVACY_POLICY.md     # Data privacy policy
 ```
 
 ---
 
-## 🛠 Installation Instructions
+## 🛠️ Architecture Details
 
-1.  Clone or download this repository to your local computer.
-2.  Open **Google Chrome** (or Microsoft Edge / Opera / Brave).
-3.  Navigate to the Extensions dashboard by entering `chrome://extensions/` in the address bar.
-4.  Enable **Developer mode** by toggling the switch in the top-right corner.
-5.  Click on **Load unpacked** in the top-left corner.
-6.  Select the `RedirectShield` root directory.
-7.  The extension is now ready! Pin it to your browser toolbar to get started.
+Redirect Shield AI is engineered with a modular separation of concerns. Common modules (logger, storage helper, etc.) are imported into service workers using `importScripts` and parsed in content scripts via the `manifest.json` scripts array.
+
+```
+                  ┌──────────────────────┐
+                  │  chrome.storage      │
+                  └──────────▲───────────┘
+                             │ (Promise sync)
+┌──────────────┐  Message    ├──────────────────────┐  Message    ┌──────────────┐
+│ Popup UI     ├────────────►│ background.js        │◄────────────┤ options.html │
+│ (popup.js)   │  Sync       │ (Service Worker)     │  Sync       │ (options.js) │
+└──────────────┘             └──────────▲───────────┘             └──────────────┘
+                                        │ (Runtime Msg)
+                               ┌────────┴───────────┐
+                               │ content.js         │ (Isolated World)
+                               │ (Content Script)   │
+                               └────────▲───────────┘
+                                        │ (postMessage config / block triggers)
+                               ┌────────┴───────────┐
+                               │ inject.js          │ (Main Page World)
+                               │ (Prototype hooks)  │
+                               └────────────────────┘
+```
+
+- **Main-World Prototype Overrides**: Since standard content scripts run inside isolated environments, they cannot hijack page-level JS variables. We inject `inject.js` directly into the page's DOM context to override properties (like `Location.prototype.href`) synchronously.
+- **Throttled MutationObservers**: To prevent lags during heavy scrolling, changes are caught using `MutationObserver` triggers throttled to a maximum rate of once every 400ms.
+- **Sandboxed Alerts**: Notification warnings are rendered inside a closed `Shadow DOM` tree attached to a custom container, preventing host site stylesheets from polluting the notification design.
 
 ---
 
-## 🛡 Explanations of Permissions
+## 📦 Installation Guide
 
-*   `storage`: Used to save the user configuration parameters (shield state, whitelist, blacklist, preference variables, analytics).
-*   `tabs` & `activeTab`: Used to query the current active website domain when clicking the popup extension window.
-*   `scripting`: Necessary to inject main-world scripts (`inject.js`) on the target web pages.
-*   `host_permissions` (`<all_urls>`): Needed to execute content script shielding on any domain the user navigates to.
-
----
-
-## 🔒 Privacy Policy
-
-*   **Zero Data Collection**: Redirect Shield operates fully client-side and offline.
-*   **No Remote Services**: It never sends tracking data, metrics, or logs to remote servers. All stats and settings remain saved locally in `chrome.storage.local`.
-*   **No Tracking Libraries**: Built without NPM node packages or tracking trackers.
+To load the extension unpacked for development or auditing:
+1. Open Google Chrome, Microsoft Edge, Brave, or Opera.
+2. Navigate to: **`chrome://extensions/`**
+3. Turn on the **Developer Mode** toggle switch (top-right corner).
+4. Click the **Load unpacked** button (top-left corner).
+5. Choose this project directory folder.
+6. The extension is now loaded and will display in your browser toolbar!
 
 ---
 
-## 🗺 Future Roadmap
+## 🔒 Permissions Guide
 
-- [ ] **AI-Based Ad Pattern Detection**: Implement heuristics to automatically classify overlay containers.
-- [ ] **Cloud Sync**: Sync settings across computers using encrypted user keys.
-- [ ] **Community Block Lists**: Dynamically update domain lists from community sources.
-- [ ] **Firefox & Safari Ports**: Port the codebase to support MV2/MV3 on Safari and Gecko engines.
+Redirect Shield AI requests standard Manifest V3 developer permissions. Each permission is described below in accordance with Chrome Web Store Policies:
+
+- **`storage`**: Used to save whitelists, blacklists, metrics logs, theme preferences, and configurations settings locally in the browser profile.
+- **`tabs`**: Used to identify active tab URLs, update the address indicators, and send reload commands when configuration rules update.
+- **`activeTab`**: Provides temporary permission to check the active webpage’s hostname and safely execute DOM checks.
+- **`scripting`**: Required to run main-world overrides and perform script injection audits securely.
+- **Host Permission (`<all_urls>`)**: Required to run the blocker script on all web address hostnames. Overriding redirects must occur instantly at page launch on all hosts to prevent bypass loops.
+
+---
+
+## 🧪 Testing Guide
+
+We provide a local test sandbox `test_sandbox.html` inside the project folder. To run tests:
+1. Open Chrome and load the extension unpacked.
+2. Double click the `test_sandbox.html` file or drag it into Chrome.
+3. Test the sandbox sections:
+   - **window.open()**: Try triggering a popup; it will block it and show a toast notification.
+   - **Page Redirections**: Try setting location properties; they will be blocked.
+   - **Target Blank**: Click external blank links; they will load in the same tab instead.
+   - **Invisible Overlays**: Click the overlay button to spawn a full viewport layer. Observe that the extension detects and deletes it instantly.
+   - **Fake Downloads**: Flag deceptive play/download buttons and inspect warning highlights.
+
+---
+
+## 🛡️ Privacy Policy Summary
+
+Redirect Shield AI operates fully locally.
+- **No data collection**: Domain logs, stats, and configurations are kept in browser storage.
+- **No tracking**: The extension does not collect analytics or track history.
+- **No remote calls**: All threat ratings and overlay checkers run offline on your machine.
+- **Open Source**: Auditable code, fully policy-compliant.

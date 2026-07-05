@@ -1,14 +1,13 @@
 {
   "manifest_version": 3,
-  "name": "Redirect Shield",
-  "version": "1.0.0",
-  "description": "Completely blocks unwanted redirects, popups, click-hijacking, and ads while maintaining normal site functionality.",
+  "name": "Redirect Shield AI",
+  "version": "2.0.0",
+  "description": "An AI-enhanced security extension blocking malicious popups, deceptive redirects, transparent overlays, and fake download buttons.",
   "permissions": [
     "storage",
     "tabs",
     "activeTab",
-    "scripting",
-    "contextMenus"
+    "scripting"
   ],
   "host_permissions": [
     "<all_urls>"
@@ -19,7 +18,16 @@
   "content_scripts": [
     {
       "matches": ["<all_urls>"],
-      "js": ["content.js"],
+      "js": [
+        "utils/logger.js",
+        "utils/storage.js",
+        "utils/helpers.js",
+        "utils/rules.js",
+        "utils/detector.js",
+        "utils/overlay.js",
+        "utils/toast.js",
+        "content.js"
+      ],
       "run_at": "document_start",
       "all_frames": true
     }
@@ -31,7 +39,7 @@
       "48": "icons/icon48.png",
       "128": "icons/icon128.png"
     },
-    "default_title": "Redirect Shield"
+    "default_title": "Redirect Shield AI"
   },
   "options_page": "options/options.html",
   "icons": {
@@ -50,7 +58,7 @@
       "suggested_key": {
         "default": "Ctrl+Shift+B"
       },
-      "description": "Toggle Redirect Shield Protection (Ctrl+Shift+B or check system shortcuts)"
+      "description": "Toggle Redirect Shield AI Protection state"
     }
   }
 }
