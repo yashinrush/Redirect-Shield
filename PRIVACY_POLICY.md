@@ -2,10 +2,10 @@
 
 **Effective Date: July 5, 2026**
 
-Redirect Shield AI ("we", "our", or "the extension") is committed to protecting your privacy. This Privacy Policy explains our practices regarding user information and data security.
+NexShield ("we", "our", or "the extension") is committed to protecting your privacy. This Privacy Policy explains our practices regarding user information and data security.
 
 ## 1. No Data Collection
-Redirect Shield AI **does not collect, track, store, or transmit** any personal data, browsing history, settings, or search queries. 
+NexShield **does not collect, track, store, or transmit** any personal data, browsing history, settings, or search queries. 
 
 - **No Remote Telemetry**: The extension does not communicate with external analytics servers, databases, or API logs.
 - **No Third-Party Trackers**: We do not integrate advertisements, tracking pixels, or third-party analytics software.

@@ -51,12 +51,12 @@
       const resetStyle = 'color: inherit; font-weight: normal;';
 
       if (extraData !== undefined) {
-        console.groupCollapsed(`%c[RedirectShieldAI] [${timestamp}] [${prefix}] %c${message}`, style, resetStyle);
+        console.groupCollapsed(`%c[NexShield] [${timestamp}] [${prefix}] %c${message}`, style, resetStyle);
         console.log('Log details:', extraData);
         console.trace('Call stack trace:');
         console.groupEnd();
       } else {
-        console.log(`%c[RedirectShieldAI] [${timestamp}] [${prefix}] %c${message}`, style, resetStyle);
+        console.log(`%c[NexShield] [${timestamp}] [${prefix}] %c${message}`, style, resetStyle);
       }
     }
 

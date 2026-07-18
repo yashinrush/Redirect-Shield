@@ -188,7 +188,7 @@
 
       // Interrupt click events on deceptive links to prompt user confirmation
       element.addEventListener('click', function(e) {
-        const proceed = confirm(`Redirect Shield Alert:\n\nThis button is flagged as: "${reason}".\n\nAre you sure you want to proceed?`);
+        const proceed = confirm(`NexShield Alert:\n\nThis button is flagged as: "${reason}".\n\nAre you sure you want to proceed?`);
         if (!proceed) {
           e.preventDefault();
           e.stopPropagation();

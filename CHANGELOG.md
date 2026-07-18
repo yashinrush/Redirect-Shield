@@ -1,6 +1,6 @@
 # Changelog
 
-All notable changes to the **Redirect Shield AI** extension will be documented in this file.
+All notable changes to the **NexShield** extension will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
@@ -26,7 +26,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [1.0.0] - 2026-06-12
 
 ### Added
-- Initial baseline release of Redirect Shield extension.
+- Initial baseline release of NexShield extension.
 - Chrome Manifest V3 configuration support.
 - Core popups blocking rules checking (`window.open`).
 - Standard local storage Whitelist / Blacklist configurations.

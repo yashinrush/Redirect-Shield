@@ -24,6 +24,13 @@ document.addEventListener('DOMContentLoaded', () => {
   const blacklistSearch = document.getElementById('blacklist-search');
   const blacklistList = document.getElementById('blacklist-list');
 
+  // Custom Level elements
+  const customLevelInput = document.getElementById('custom-level-input');
+  const customLevelSelect = document.getElementById('custom-level-select');
+  const addCustomLevelBtn = document.getElementById('add-custom-level-btn');
+  const customLevelSearch = document.getElementById('custom-level-search');
+  const customLevelList = document.getElementById('custom-level-list');
+
   // Statistics counters
   const statsTotalAll = document.getElementById('stats-total-all');
   const statsTodayAll = document.getElementById('stats-today-all');
@@ -115,6 +122,7 @@ document.addEventListener('DOMContentLoaded', () => {
     // Render Whitelist & Blacklist domains
     renderDomainList('whitelist');
     renderDomainList('blacklist');
+    renderCustomLevels();
 
     // Populate Analytics numbers
     const stats = appState.stats || {};
@@ -210,6 +218,10 @@ document.addEventListener('DOMContentLoaded', () => {
   blacklistInput.addEventListener('keypress', (e) => { if (e.key === 'Enter') addDomain('blacklist'); });
   blacklistSearch.addEventListener('input', () => renderDomainList('blacklist'));
 
+  addCustomLevelBtn.addEventListener('click', addCustomRule);
+  customLevelInput.addEventListener('keypress', (e) => { if (e.key === 'Enter') addCustomRule(); });
+  customLevelSearch.addEventListener('input', renderCustomLevels);
+
   async function addDomain(type) {
     const inputEl = type === 'whitelist' ? whitelistInput : blacklistInput;
     let domainStr = inputEl.value.trim().toLowerCase();
@@ -274,6 +286,9 @@ document.addEventListener('DOMContentLoaded', () => {
     const items = appState[type] || [];
     const searchQuery = searchEl.value.trim().toLowerCase();
 
+    const badgeEl = document.getElementById(`${type}-count`);
+    if (badgeEl) badgeEl.textContent = items.length;
+
     listEl.innerHTML = '';
 
     const filtered = items.filter(domain => domain.includes(searchQuery));
@@ -301,6 +316,103 @@ document.addEventListener('DOMContentLoaded', () => {
       `;
 
       delBtn.addEventListener('click', () => deleteDomain(type, domain));
+
+      li.appendChild(span);
+      li.appendChild(delBtn);
+      listEl.appendChild(li);
+    });
+  }
+
+  async function addCustomRule() {
+    let domainStr = customLevelInput.value.trim().toLowerCase();
+    if (!domainStr) return;
+
+    try {
+      if (domainStr.includes('://')) {
+        domainStr = new URL(domainStr).hostname;
+      } else {
+        domainStr = new URL('http://' + domainStr).hostname;
+      }
+    } catch (e) {
+      alert('Invalid domain format entered. Please enter a valid host name like site.com.');
+      return;
+    }
+
+    if (globalScope.RedirectShieldHelpers && !globalScope.RedirectShieldHelpers.isValidDomain(domainStr)) {
+      alert('Invalid domain format. Domain must contain a valid TLD extension (e.g. site.com).');
+      return;
+    }
+
+    const customLevels = appState.customLevels || {};
+    const selectedLevel = customLevelSelect.value || 'balanced';
+
+    // Remove from whitelist/blacklist to avoid rules collision
+    const whitelist = appState.whitelist || [];
+    const blacklist = appState.blacklist || [];
+    
+    const wIdx = whitelist.indexOf(domainStr);
+    if (wIdx > -1) whitelist.splice(wIdx, 1);
+    
+    const bIdx = blacklist.indexOf(domainStr);
+    if (bIdx > -1) blacklist.splice(bIdx, 1);
+
+    customLevels[domainStr] = selectedLevel;
+
+    await storage.set({
+      customLevels,
+      whitelist,
+      blacklist
+    });
+
+    customLevelInput.value = '';
+    notifyTabsOfChange();
+    await loadSettings();
+  }
+
+  function renderCustomLevels() {
+    const listEl = customLevelList;
+    const searchEl = customLevelSearch;
+    const items = appState.customLevels || {};
+    const searchQuery = searchEl.value.trim().toLowerCase();
+
+    const badgeEl = document.getElementById('custom-count');
+    if (badgeEl) badgeEl.textContent = Object.keys(items).length;
+
+    listEl.innerHTML = '';
+
+    const filtered = Object.entries(items).filter(([domain]) => domain.includes(searchQuery));
+    if (filtered.length === 0) {
+      listEl.innerHTML = `<li class="domain-item"><span style="color: var(--text-muted-dark); font-style: italic;">No domains found.</span></li>`;
+      return;
+    }
+
+    filtered.sort((a, b) => a[0].localeCompare(b[0])).forEach(([domain, level]) => {
+      const li = document.createElement('li');
+      li.className = 'domain-item';
+
+      const span = document.createElement('span');
+      // Format level text with a colored tag matching active protection themes
+      const badgeColor = level === 'maximum' ? 'var(--danger-gradient)' : level === 'advanced' ? 'var(--primary-gradient)' : 'rgba(255, 255, 255, 0.15)';
+      const badgeTextCol = level === 'maximum' || level === 'advanced' ? '#000000' : 'var(--text-main)';
+      span.innerHTML = `${domain} <span style="font-size: 10px; font-weight: 800; text-transform: uppercase; background: ${badgeColor}; color: ${badgeTextCol}; padding: 2px 6px; border-radius: 4px; margin-left: 6px;">${level}</span>`;
+      span.title = `${domain} (${level})`;
+
+      const delBtn = document.createElement('button');
+      delBtn.className = 'delete-btn';
+      delBtn.title = 'Remove rule';
+      delBtn.innerHTML = `
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <polyline points="3 6 5 6 21 6"/>
+          <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>
+        </svg>
+      `;
+
+      delBtn.addEventListener('click', async () => {
+        delete items[domain];
+        await storage.set({ customLevels: items });
+        notifyTabsOfChange();
+        await loadSettings();
+      });
 
       li.appendChild(span);
       li.appendChild(delBtn);
@@ -375,6 +487,7 @@ document.addEventListener('DOMContentLoaded', () => {
       protectionLevel: data.protectionLevel || 'balanced',
       whitelist: data.whitelist || [],
       blacklist: data.blacklist || [],
+      customLevels: data.customLevels || {},
       showToasts: data.showToasts !== false,
       consoleLogging: data.consoleLogging !== false,
       autoRemoveOverlays: data.autoRemoveOverlays !== false,

@@ -1,6 +1,6 @@
-# Redirect Shield - Technical Documentation
+# NexShield - Technical Documentation
 
-Redirect Shield is a high-fidelity browser extension built on Chrome Extension Manifest V3. It intercepts and prevents advertisements, popups, click hijacking, and malicious redirects on streaming and download sites, while keeping normal web operations running smoothly.
+NexShield is a high-fidelity browser extension built on Chrome Extension Manifest V3. It intercepts and prevents advertisements, popups, click hijacking, and malicious redirects on streaming and download sites, while keeping normal web operations running smoothly.
 
 ---
 
@@ -8,7 +8,7 @@ Redirect Shield is a high-fidelity browser extension built on Chrome Extension M
 
 Modern browser extensions run content scripts in an **Isolated World** context. This sandbox protects user data but prevents content scripts from modifying variables or function signatures inside the page's original context (the **Main World**).
 
-To intercept native JavaScript redirection vectors, Redirect Shield uses a hybrid injection strategy:
+To intercept native JavaScript redirection vectors, NexShield uses a hybrid injection strategy:
 
 ```mermaid
 sequenceDiagram
@@ -39,20 +39,20 @@ sequenceDiagram
 ## 🧠 Business Logic & Redirection Classification
 
 ### 1. User Interaction Identification
-Malicious scripts often trigger popups by registering standard click listeners or using timers. Redirect Shield distinguishes legitimate user actions from programmatic scripts by tracking user activity:
+Malicious scripts often trigger popups by registering standard click listeners or using timers. NexShield distinguishes legitimate user actions from programmatic scripts by tracking user activity:
 
 *   Whenever a user triggers `click`, `keydown`, `touchstart`, or `mousedown`, a global boolean `isUserInteracting` is set to `true`.
 *   A `setTimeout` window resets `isUserInteracting` to `false` after **800ms**.
 *   If `window.open` or location parameters modify values when `isUserInteracting` is `false`, the redirect is blocked as an automatic ad behavior.
 
 ### 2. External Domain Detection
-Legitimate page actions (like logging in via Google/Github or navigating subdomains) should not be blocked. Redirect Shield parses target URLs to check if they are external:
+Legitimate page actions (like logging in via Google/Github or navigating subdomains) should not be blocked. NexShield parses target URLs to check if they are external:
 *   Redirection targets matching relative paths (`/path`), anchor tags (`#section`), local files (`.html`), or special schemes (`javascript:`, `mailto:`, `tel:`) are allowed.
 *   We extract hosts and verify if target hosts match the root host or subdomains of the active page (e.g., `api.example.com` on `example.com` is allowed).
 *   OAuth providers are allowed during normal clicks, but blocked if triggered programmatically without user consent.
 
 ### 3. Click-Hijacking (Invisible Overlays)
-Streaming sites often overlay an invisible transparent `div` across the entire screen. A click anywhere triggers an ad popup and removes the overlay. Redirect Shield blocks this using a throttled `MutationObserver` scan:
+Streaming sites often overlay an invisible transparent `div` across the entire screen. A click anywhere triggers an ad popup and removes the overlay. NexShield blocks this using a throttled `MutationObserver` scan:
 *   **Dimensions**: Elements matching viewport bounds (`width >= 85vw` and `height >= 85vh` or `width/height: 100%`).
 *   **Layering**: Elevated stacks (`z-index >= 90`) with `position: fixed` or `position: absolute`.
 *   **Transparency**: Background colors set to `transparent`, low alphas (`rgba(..., 0)`), or structural opacities `< 0.12`.
@@ -107,7 +107,7 @@ Directly modifies window APIs.
 ### Running Verification Tests
 Open the sandbox file [test_sandbox.html](file:///c:/Users/ASUS/Desktop/redirect%20shield/test_sandbox.html) in your browser.
 
-*   **Test window.open()**: Click `Run window.open()`. The extension will block it, output a log in the console (press F12 to check console logs starting with `[RedirectShield]`), and display a bottom-right toast message.
+*   **Test window.open()**: Click `Run window.open()`. The extension will block it, output a log in the console (press F12 to check console logs starting with `[NexShield]`), and display a bottom-right toast message.
 *   **Test Location Redirect**: Click `Set location.href`. The script intercepts the property override and blocks page redirection.
 *   **Test Click Hijacking**: Click `Spawn Invisible Hijack Overlay`. An invisible container layer is added to the DOM. Notice the status badge switches to **ACTIVE** and instantly reverts to **INACTIVE** as the extension deletes the element.
 *   **Toggle State**: Press the key combination (`Ctrl+Shift+B` or fallback configurations). Open the extension popup to watch stats update dynamically.

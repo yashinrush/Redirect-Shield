@@ -14,6 +14,7 @@ document.addEventListener('DOMContentLoaded', () => {
   const siteReputationEl = document.getElementById('site-reputation');
   const whitelistBtn = document.getElementById('whitelist-site-btn');
   const blacklistBtn = document.getElementById('blacklist-site-btn');
+  const siteLevelSelect = document.getElementById('site-level-select');
 
   const statTodayEl = document.getElementById('stat-today');
   const statTotalEl = document.getElementById('stat-total');
@@ -34,7 +35,18 @@ document.addEventListener('DOMContentLoaded', () => {
   const detector = RedirectShieldDetector;
   const helpers = RedirectShieldHelpers;
 
+  // New Interactive DOM References
+  const zapOverlaysBtn = document.getElementById('zap-overlays-btn');
+  const activityCard = document.getElementById('activity-card');
+  const activityLogList = document.getElementById('activity-log-list');
+
+  const chkPopups = document.getElementById('chk-popups');
+  const chkRedirects = document.getElementById('chk-redirects');
+  const chkOverlays = document.getElementById('chk-overlays');
+  const chkDeceptive = document.getElementById('chk-deceptive');
+
   let currentDomain = '';
+  let activeTabId = null;
   let appSettings = {};
 
   /**
@@ -47,10 +59,19 @@ document.addEventListener('DOMContentLoaded', () => {
       const activeTab = tabs[0];
       
       if (activeTab && activeTab.url) {
+        activeTabId = activeTab.id;
         const url = new URL(activeTab.url);
         if (url.protocol.startsWith('http')) {
           currentDomain = url.hostname.toLowerCase();
           currentDomainEl.textContent = currentDomain;
+
+          // Fetch tab block logs from background cache
+          chrome.runtime.sendMessage({
+            type: 'REDIRECT_SHIELD_GET_TAB_LOGS',
+            tabId: activeTabId
+          }, (logs) => {
+            renderActivityLogs(logs);
+          });
         } else {
           setSystemPageMode();
         }
@@ -70,6 +91,8 @@ document.addEventListener('DOMContentLoaded', () => {
     currentDomainEl.textContent = 'System Page';
     whitelistBtn.disabled = true;
     blacklistBtn.disabled = true;
+    siteLevelSelect.disabled = true;
+    siteLevelSelect.value = 'default';
   }
 
   function setUnknownPageMode() {
@@ -77,6 +100,8 @@ document.addEventListener('DOMContentLoaded', () => {
     currentDomainEl.textContent = 'Internal Webpage';
     whitelistBtn.disabled = true;
     blacklistBtn.disabled = true;
+    siteLevelSelect.disabled = true;
+    siteLevelSelect.value = 'default';
   }
 
   /**
@@ -121,6 +146,37 @@ document.addEventListener('DOMContentLoaded', () => {
     animateCounter(statRedirectsEl, total.redirects || 0);
     animateCounter(statOverlaysEl, total.overlays || 0);
     animateCounter(statDeceptiveEl, total.deceptive || 0);
+
+    // Update active rules checklist UI
+    updateChecklists();
+  }
+
+  /**
+   * Refreshes active protection checklists based on current shield level settings
+   */
+  function updateChecklists() {
+    const isEnabled = appSettings.enabled !== false;
+    const level = appSettings.protectionLevel || 'balanced';
+
+    // Whitelisted site blocks nothing
+    const isWhitelisted = currentDomain && (appSettings.whitelist || []).includes(currentDomain);
+    const active = isEnabled && !isWhitelisted;
+
+    const popupsActive = active;
+    const redirectsActive = active && level !== 'basic';
+    const overlaysActive = active && level !== 'basic' && appSettings.autoRemoveOverlays !== false;
+    const deceptiveActive = active && appSettings.detectFakeDownloads !== false;
+
+    const toggleItem = (el, isActive) => {
+      if (!el) return;
+      if (isActive) el.classList.add('active');
+      else el.classList.remove('active');
+    };
+
+    toggleItem(chkPopups, popupsActive);
+    toggleItem(chkRedirects, redirectsActive);
+    toggleItem(chkOverlays, overlaysActive);
+    toggleItem(chkDeceptive, deceptiveActive);
   }
 
   /**
@@ -145,7 +201,17 @@ document.addEventListener('DOMContentLoaded', () => {
     if (!currentDomain) {
       siteReputationEl.className = 'status-indicator';
       siteReputationEl.innerHTML = '<span class="indicator-dot"></span>N/A';
+      siteLevelSelect.disabled = true;
+      siteLevelSelect.value = 'default';
       return;
+    }
+
+    siteLevelSelect.disabled = !isEnabled;
+    const customLevels = appSettings.customLevels || {};
+    if (customLevels[currentDomain]) {
+      siteLevelSelect.value = customLevels[currentDomain];
+    } else {
+      siteLevelSelect.value = 'default';
     }
 
     // Determine domain list memberships
@@ -315,6 +381,24 @@ document.addEventListener('DOMContentLoaded', () => {
     applyTheme(newTheme);
   });
 
+  // Site-specific protection level dropdown change handler
+  siteLevelSelect.addEventListener('change', async () => {
+    if (!currentDomain) return;
+
+    const customLevels = appSettings.customLevels || {};
+    const selectedLevel = siteLevelSelect.value;
+
+    if (selectedLevel === 'default') {
+      delete customLevels[currentDomain];
+    } else {
+      customLevels[currentDomain] = selectedLevel;
+    }
+
+    await storage.set({ customLevels });
+    await loadConfigAndRender();
+    notifyCurrentTabOfChange();
+  });
+
   // Reset stats triggers
   resetStatsBtn.addEventListener('click', async () => {
     const confirmReset = confirm('Are you sure you want to reset all blocked event history and counts?');
@@ -340,8 +424,97 @@ document.addEventListener('DOMContentLoaded', () => {
   chrome.runtime.onMessage.addListener((message) => {
     if (message && message.type === 'REDIRECT_SHIELD_STATS_UPDATED') {
       loadConfigAndRender();
+      if (message.tabId === activeTabId && message.tabLogs) {
+        renderActivityLogs(message.tabLogs);
+      }
     }
   });
+
+  // Manual Zap Overlays listener
+  zapOverlaysBtn.addEventListener('click', () => {
+    if (!activeTabId) return;
+
+    try {
+      chrome.tabs.sendMessage(activeTabId, { type: 'REDIRECT_SHIELD_MANUAL_ZAP' }, (response) => {
+        const iconSvg = `
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+            <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/>
+          </svg>
+        `;
+        if (response && response.success) {
+          const removedText = response.removed ? 'Cleaned Overlays' : 'Clean Page';
+          zapOverlaysBtn.innerHTML = `${iconSvg} Swept! ${removedText}`;
+          zapOverlaysBtn.style.color = 'var(--safe-color)';
+          zapOverlaysBtn.style.borderColor = 'var(--safe-color)';
+
+          // Query logs update
+          chrome.runtime.sendMessage({
+            type: 'REDIRECT_SHIELD_GET_TAB_LOGS',
+            tabId: activeTabId
+          }, (logs) => {
+            renderActivityLogs(logs);
+          });
+
+          setTimeout(() => {
+            zapOverlaysBtn.innerHTML = `${iconSvg} Zap Overlays Manually`;
+            zapOverlaysBtn.style.color = '';
+            zapOverlaysBtn.style.borderColor = '';
+          }, 1500);
+        } else {
+          zapOverlaysBtn.innerHTML = `${iconSvg} Zap Failed`;
+          zapOverlaysBtn.style.color = 'var(--danger-color)';
+          zapOverlaysBtn.style.borderColor = 'var(--danger-color)';
+          setTimeout(() => {
+            zapOverlaysBtn.innerHTML = `${iconSvg} Zap Overlays Manually`;
+            zapOverlaysBtn.style.color = '';
+            zapOverlaysBtn.style.borderColor = '';
+          }, 1500);
+        }
+      });
+    } catch (e) {
+      console.error(e);
+    }
+  });
+
+  /**
+   * Renders the tab activity logs list
+   */
+  function renderActivityLogs(logs) {
+    if (!logs || logs.length === 0) {
+      activityCard.style.display = 'none';
+      return;
+    }
+
+    activityCard.style.display = 'block';
+    activityLogList.innerHTML = '';
+
+    const typeTextMap = {
+      popup: 'Popup',
+      redirect: 'Redirect',
+      overlay: 'Overlay',
+      deceptive: 'Deceptive'
+    };
+
+    // Render last 3 logs
+    logs.slice(0, 3).forEach(log => {
+      const item = document.createElement('div');
+      item.className = 'activity-item';
+
+      const typeLabel = typeTextMap[log.type] || log.type;
+      const urlText = log.url || 'Overlay removed';
+
+      item.innerHTML = `
+        <div class="activity-item-info">
+          <div class="activity-item-url" title="${urlText}">${urlText}</div>
+          <div class="activity-item-meta">
+            <span class="activity-item-badge badge-${log.type}">${typeLabel}</span>
+          </div>
+        </div>
+        <div class="activity-item-time">${log.time || ''}</div>
+      `;
+      activityLogList.appendChild(item);
+    });
+  }
 
   // Launch initial checks
   init();

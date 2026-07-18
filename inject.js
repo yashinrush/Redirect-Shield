@@ -164,7 +164,7 @@
     const cleanUrl = url ? String(url).substring(0, 150) : 'unknown';
 
     if (config.consoleLogging) {
-      console.warn(`%c[RedirectShieldAI] Intercepted [${blockType}] attempt leads to: ${cleanUrl}`, 'color: #ef4444; font-weight: bold;');
+      console.warn(`%c[NexShield] Intercepted [${blockType}] attempt leads to: ${cleanUrl}`, 'color: #ef4444; font-weight: bold;');
     }
 
     window.postMessage({

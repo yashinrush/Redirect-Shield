@@ -1,6 +1,6 @@
-# Redirect Shield AI
+# NexShield
 
-Redirect Shield AI is a professional-grade, lightweight browser security extension built for modern Manifest V3. It intercepts malicious redirects, programmatic click hijacking, invisible ad overlays, and deceptive fake download links on streaming, media, and manga sites—while preserving normal website functionality.
+NexShield is a professional-grade, lightweight browser security extension built for modern Manifest V3. It intercepts malicious redirects, programmatic click hijacking, invisible ad overlays, and deceptive fake download links on streaming, media, and manga sites—while preserving normal website functionality.
 
 ## 📸 Visual Previews
 
@@ -60,7 +60,7 @@ RedirectShieldAI/
 
 ## 🛠️ Architecture Details
 
-Redirect Shield AI is engineered with a modular separation of concerns. Common modules (logger, storage helper, etc.) are imported into service workers using `importScripts` and parsed in content scripts via the `manifest.json` scripts array.
+NexShield is engineered with a modular separation of concerns. Common modules (logger, storage helper, etc.) are imported into service workers using `importScripts` and parsed in content scripts via the `manifest.json` scripts array.
 
 ```
                   ┌──────────────────────┐
@@ -103,7 +103,7 @@ To load the extension unpacked for development or auditing:
 
 ## 🔒 Permissions Guide
 
-Redirect Shield AI requests standard Manifest V3 developer permissions. Each permission is described below in accordance with Chrome Web Store Policies:
+NexShield requests standard Manifest V3 developer permissions. Each permission is described below in accordance with Chrome Web Store Policies:
 
 - **`storage`**: Used to save whitelists, blacklists, metrics logs, theme preferences, and configurations settings locally in the browser profile.
 - **`tabs`**: Used to identify active tab URLs, update the address indicators, and send reload commands when configuration rules update.
@@ -129,7 +129,7 @@ We provide a local test sandbox `test_sandbox.html` inside the project folder. T
 
 ## 🛡️ Privacy Policy Summary
 
-Redirect Shield AI operates fully locally.
+NexShield operates fully locally.
 - **No data collection**: Domain logs, stats, and configurations are kept in browser storage.
 - **No tracking**: The extension does not collect analytics or track history.
 - **No remote calls**: All threat ratings and overlay checkers run offline on your machine.

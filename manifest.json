@@ -1,6 +1,6 @@
 {
   "manifest_version": 3,
-  "name": "Redirect Shield AI",
+  "name": "NexShield",
   "version": "2.0.0",
   "description": "An AI-enhanced security extension blocking malicious popups, deceptive redirects, transparent overlays, and fake download buttons.",
   "permissions": [
@@ -30,20 +30,29 @@
       ],
       "run_at": "document_start",
       "all_frames": true
+    },
+    {
+      "matches": ["<all_urls>"],
+      "js": ["inject.js"],
+      "run_at": "document_start",
+      "all_frames": true,
+      "world": "MAIN"
     }
   ],
   "action": {
     "default_popup": "popup/popup.html",
     "default_icon": {
       "16": "icons/icon16.png",
+      "32": "icons/icon32.png",
       "48": "icons/icon48.png",
       "128": "icons/icon128.png"
     },
-    "default_title": "Redirect Shield AI"
+    "default_title": "NexShield"
   },
   "options_page": "options/options.html",
   "icons": {
     "16": "icons/icon16.png",
+    "32": "icons/icon32.png",
     "48": "icons/icon48.png",
     "128": "icons/icon128.png"
   },
@@ -58,7 +67,7 @@
       "suggested_key": {
         "default": "Ctrl+Shift+B"
       },
-      "description": "Toggle Redirect Shield AI Protection state"
+      "description": "Toggle NexShield Protection state"
     }
   }
 }

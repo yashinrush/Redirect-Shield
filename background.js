@@ -18,6 +18,14 @@ const storage = RedirectShieldStorage;
 // Set threshold level for the logger
 logger.setLevel('INFO');
 
+// Track recent blocked events log per tabId (in-memory)
+const tabBlockLogs = {};
+
+// Clean up tabBlockLogs when tab is closed to prevent leaks
+chrome.tabs.onRemoved.addListener((tabId) => {
+  delete tabBlockLogs[tabId];
+});
+
 // Synchronize badge UI on start and installation
 chrome.runtime.onInstalled.addListener(() => {
   storage.initializeDefaults().then(() => {
@@ -99,6 +107,18 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     // Record redirection block and update stats logs
     const { blockType, blockedUrl } = message.detail;
     
+    // Add to in-memory tab log cache
+    if (tabId) {
+      if (!tabBlockLogs[tabId]) tabBlockLogs[tabId] = [];
+      const timeStr = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+      tabBlockLogs[tabId].unshift({
+        type: blockType,
+        url: blockedUrl,
+        time: timeStr
+      });
+      if (tabBlockLogs[tabId].length > 5) tabBlockLogs[tabId].pop();
+    }
+
     storage.recordBlockEvent(blockType, blockedUrl).then((updatedStats) => {
       logger.info(`Blocked event logged: [${blockType}] target: ${blockedUrl}`);
       
@@ -111,7 +131,9 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       // Broadcast changes to active popup/options page if open
       chrome.runtime.sendMessage({
         type: 'REDIRECT_SHIELD_STATS_UPDATED',
-        stats: updatedStats
+        stats: updatedStats,
+        tabId: tabId,
+        tabLogs: tabId ? tabBlockLogs[tabId] : []
       }).catch(() => {
         // Safe to ignore: occurs when UI screens are closed
       });
@@ -123,6 +145,11 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     });
 
     return true;
+
+  } else if (message.type === 'REDIRECT_SHIELD_GET_TAB_LOGS') {
+    const qTabId = message.tabId;
+    sendResponse(tabBlockLogs[qTabId] || []);
+    return false;
 
   } else if (message.type === 'REDIRECT_SHIELD_TOGGLE_STATE') {
     // Toggle overall protection state

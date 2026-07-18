@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Redirect Shield AI</title>
+  <title>NexShield</title>
   <link rel="stylesheet" href="popup.css">
 </head>
 <body>
@@ -18,10 +18,8 @@
     <!-- Header -->
     <header class="app-header">
       <div class="logo-container">
-        <svg class="logo-icon" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
-          <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
-        </svg>
-        <span class="app-name">Shield AI</span>
+        <img src="../icons/neximg.png" class="logo-img" alt="NexShield Logo">
+        <span class="app-name">NexShield</span>
       </div>
       <div class="header-actions">
         <button id="theme-toggle-btn" class="icon-button" title="Toggle Theme">
@@ -77,6 +75,16 @@
             Safe Domain
           </span>
         </div>
+        <div class="tab-level-row">
+          <span class="label">Site Shield</span>
+          <select id="site-level-select" class="site-level-dropdown">
+            <option value="default">Global Default</option>
+            <option value="basic">Basic Protection</option>
+            <option value="balanced">Balanced Mode</option>
+            <option value="advanced">Advanced Shield</option>
+            <option value="maximum">Strict Shield</option>
+          </select>
+        </div>
       </div>
       <div class="tab-actions">
         <button id="whitelist-site-btn" class="action-btn outline">
@@ -94,6 +102,35 @@
           Blacklist Site
         </button>
       </div>
+    </section>
+
+    <!-- Active Rules Checklist -->
+    <section class="checklist-section glass-card">
+      <h3 class="section-title">Shield Features</h3>
+      <div class="checklist-grid">
+        <div class="check-item" id="chk-popups">
+          <span class="chk-indicator"></span>
+          <span class="chk-label">Popup Blocker</span>
+        </div>
+        <div class="check-item" id="chk-redirects">
+          <span class="chk-indicator"></span>
+          <span class="chk-label">Redirect Shield</span>
+        </div>
+        <div class="check-item" id="chk-overlays">
+          <span class="chk-indicator"></span>
+          <span class="chk-label">Overlay Cleaner</span>
+        </div>
+        <div class="check-item" id="chk-deceptive">
+          <span class="chk-indicator"></span>
+          <span class="chk-label">Deceptive Finder</span>
+        </div>
+      </div>
+      <button id="zap-overlays-btn" class="zap-btn" title="Zap overlays manually">
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+          <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/>
+        </svg>
+        Zap Overlays Manually
+      </button>
     </section>
 
     <!-- Real-time Stats Grid -->
@@ -124,6 +161,14 @@
           <span class="stat-value animated" id="stat-deceptive">0</span>
           <span class="stat-label">Deceptive</span>
         </div>
+      </div>
+    </section>
+
+    <!-- Live Activity Log -->
+    <section class="activity-section glass-card" id="activity-card" style="display: none;">
+      <h3 class="section-title">Live Activity Log</h3>
+      <div id="activity-log-list" class="activity-list">
+        <!-- Live blocks will slide in here -->
       </div>
     </section>
 

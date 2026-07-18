@@ -14,23 +14,7 @@
   let activeConfig = null;
   let mutationObserver = null;
 
-  /**
-   * Synchronously injects inject.js into the website's MAIN execution world
-   */
-  function injectMainWorldScript() {
-    try {
-      const script = document.createElement('script');
-      script.src = chrome.runtime.getURL('inject.js');
-      // Execute instantly at document_start before other page scripts compile
-      (document.head || document.documentElement).appendChild(script);
-      script.onload = () => script.remove();
-    } catch (err) {
-      logger.error('Failed to inject main-world intercept script.', err);
-    }
-  }
-
-  // 1. Immediately inject blocker overrides
-  injectMainWorldScript();
+  // 1. inject.js is now natively injected in the MAIN world by Chrome via manifest.json
 
   // 2. Fetch page-specific configuration parameters from background worker
   chrome.runtime.sendMessage({
@@ -169,10 +153,22 @@
     }
   });
 
-  // Listen to configuration reload signals from background service worker
-  chrome.runtime.onMessage.addListener((message) => {
+  // Listen to configuration reload signals and manual zap commands
+  chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     if (message && message.type === 'REDIRECT_SHIELD_STATE_CHANGED') {
       window.location.reload();
+    } else if (message && message.type === 'REDIRECT_SHIELD_MANUAL_ZAP') {
+      if (activeConfig && activeConfig.enabled && !activeConfig.isWhitelisted) {
+        const didRemoveOverlays = overlayShield.removeInvisibleOverlays(activeConfig);
+        // Force scan deceptive buttons too
+        if (activeConfig.detectFakeDownloads) {
+          scanAndFlagDeceptiveElements();
+        }
+        sendResponse({ success: true, removed: didRemoveOverlays });
+      } else {
+        sendResponse({ success: false, reason: 'Shield is disabled or site is whitelisted' });
+      }
     }
+    return true;
   });
 })();
